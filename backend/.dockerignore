@@ -1,0 +1,9 @@
+# Keep the build context small and never ship local data/secrets into the image
+data/
+storage/
+*.db
+*.db-shm
+*.db-wal
+.env
+*.exe
+cloudbox-server

@@ -1,0 +1,30 @@
+# Render Blueprint — OPTIONAL alternative to the Cloudflare Tunnel.
+# Deploys the Go API as a Docker web service. Push this repo to GitHub, then in
+# the Render dashboard: New → Blueprint → pick your repo.
+#
+# ⚠️  Free instances have an EPHEMERAL filesystem: uploaded files and the SQLite
+#     database are ERASED on every restart/redeploy, and the service sleeps
+#     after ~15 min idle. For durable storage, raise `plan` to a paid tier and
+#     uncomment the `disk:` block (a 5 GB disk mounted at /data).
+services:
+  - type: web
+    name: cloudbox-api
+    runtime: docker
+    dockerfilePath: ./backend/Dockerfile
+    dockerContext: ./backend
+    plan: free
+    healthCheckPath: /health
+    envVars:
+      - key: JWT_SECRET
+        generateValue: true # Render generates a strong random secret for you
+      - key: DATABASE_URL
+        value: /data/cloudbox.db
+      - key: STORAGE_DIR
+        value: /data/storage
+      - key: MAX_UPLOAD_BYTES
+        value: "2147483648"
+    # --- Durable storage (requires a paid plan) ---
+    # disk:
+    #   name: cloudbox-data
+    #   mountPath: /data
+    #   sizeGB: 5

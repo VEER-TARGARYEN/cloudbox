@@ -1,0 +1,15 @@
+# Normalize line endings: store text as LF in the repo, regardless of OS.
+* text=auto eol=lf
+
+# Treat binary assets as binary (no EOL conversion / diff noise).
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.ttf binary
+*.otf binary
+*.keystore binary
+*.jks binary
+*.apk binary
+*.aab binary
