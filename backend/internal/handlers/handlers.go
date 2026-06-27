@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/VEER-TARGARYEN/cloudbox/backend/internal/auth"
+	"github.com/VEER-TARGARYEN/cloudbox/backend/internal/fsbrowser"
 	"github.com/VEER-TARGARYEN/cloudbox/backend/internal/storage"
 )
 
@@ -16,16 +17,18 @@ import (
 type Handler struct {
 	DB             *sql.DB
 	Tokens         *auth.TokenService
-	Store          *storage.Store // file-blob persistence on disk
-	MaxUploadBytes int64          // per-upload size ceiling
+	Store          *storage.Store     // file-blob persistence on disk
+	FS             *fsbrowser.Browser // real-filesystem browsing
+	MaxUploadBytes int64              // per-upload size ceiling
 }
 
 // New constructs a Handler.
-func New(db *sql.DB, tokens *auth.TokenService, store *storage.Store, maxUpload int64) *Handler {
+func New(db *sql.DB, tokens *auth.TokenService, store *storage.Store, fs *fsbrowser.Browser, maxUpload int64) *Handler {
 	return &Handler{
 		DB:             db,
 		Tokens:         tokens,
 		Store:          store,
+		FS:             fs,
 		MaxUploadBytes: maxUpload,
 	}
 }

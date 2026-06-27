@@ -16,6 +16,7 @@ import (
 	"github.com/VEER-TARGARYEN/cloudbox/backend/internal/auth"
 	"github.com/VEER-TARGARYEN/cloudbox/backend/internal/config"
 	"github.com/VEER-TARGARYEN/cloudbox/backend/internal/database"
+	"github.com/VEER-TARGARYEN/cloudbox/backend/internal/fsbrowser"
 	"github.com/VEER-TARGARYEN/cloudbox/backend/internal/handlers"
 	appmw "github.com/VEER-TARGARYEN/cloudbox/backend/internal/middleware"
 	"github.com/VEER-TARGARYEN/cloudbox/backend/internal/storage"
@@ -49,7 +50,14 @@ func main() {
 	// 4. Wire dependencies: JWT service + disk store + the HTTP handlers.
 	tokens := auth.NewTokenService(cfg.JWTSecret, 7*24*time.Hour)
 	store := storage.New(cfg.StorageDir)
-	h := handlers.New(db, tokens, store, cfg.MaxUploadBytes)
+	browser := fsbrowser.New(cfg.FSAllowRoots, cfg.FSReadOnly)
+	h := handlers.New(db, tokens, store, browser, cfg.MaxUploadBytes)
+
+	if len(cfg.FSAllowRoots) == 0 {
+		log.Printf("filesystem access: FULL (all drives), read-only=%v", cfg.FSReadOnly)
+	} else {
+		log.Printf("filesystem access: restricted to %v, read-only=%v", cfg.FSAllowRoots, cfg.FSReadOnly)
+	}
 
 	// 5. Build the router + global middleware.
 	//    NOTE: we deliberately do NOT add a blanket request timeout here. The
@@ -78,6 +86,12 @@ func main() {
 		pr.Get("/files", h.ListFiles)                   // list my files
 		pr.Get("/files/{id}/download", h.Download)      // download one of my files
 		pr.Delete("/files/{id}", h.DeleteFile)          // delete one of my files
+
+		// Real-filesystem browser — access the host's actual files/folders.
+		pr.Get("/fs/roots", h.FSRoots)       // drives + shortcut folders
+		pr.Get("/fs/list", h.FSList)         // list a directory
+		pr.Get("/fs/download", h.FSDownload) // download a real file
+		pr.Post("/fs/upload", h.FSUpload)    // upload into a real folder
 	})
 
 	// 7. http.Server with timeouts tuned for streaming. ReadHeaderTimeout still

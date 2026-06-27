@@ -13,8 +13,10 @@ type Config struct {
 	Port           string // HTTP port, e.g. "8080"
 	DatabaseURL    string // path to the SQLite metadata file
 	StorageDir     string // directory on disk where file blobs are written
-	JWTSecret      string // signing key for auth tokens
-	MaxUploadBytes int64  // largest single upload we accept (bytes)
+	JWTSecret      string   // signing key for auth tokens
+	MaxUploadBytes int64    // largest single upload we accept (bytes)
+	FSAllowRoots   []string // restrict host filesystem access to these roots (empty = all)
+	FSReadOnly     bool     // disable writes to the host filesystem
 }
 
 // Load reads configuration from environment variables, falling back to sane
@@ -31,6 +33,37 @@ func Load() Config {
 		StorageDir:     getenv("STORAGE_DIR", "./storage"),
 		JWTSecret:      getenv("JWT_SECRET", "dev-only-insecure-secret-change-me"),
 		MaxUploadBytes: getenvInt64("MAX_UPLOAD_BYTES", 2<<30), // 2 GiB
+		FSAllowRoots:   getenvList("FS_ALLOW_ROOTS"),
+		FSReadOnly:     getenvBool("FS_READONLY", false),
+	}
+}
+
+// getenvList parses a comma-separated env var into a slice (empty if unset).
+func getenvList(key string) []string {
+	v := strings.TrimSpace(os.Getenv(key))
+	if v == "" {
+		return nil
+	}
+	parts := strings.Split(v, ",")
+	out := make([]string, 0, len(parts))
+	for _, p := range parts {
+		if p = strings.TrimSpace(p); p != "" {
+			out = append(out, p)
+		}
+	}
+	return out
+}
+
+// getenvBool parses key as a boolean ("1", "true", "yes" → true).
+func getenvBool(key string, fallback bool) bool {
+	v := strings.ToLower(strings.TrimSpace(os.Getenv(key)))
+	switch v {
+	case "1", "true", "yes", "on":
+		return true
+	case "0", "false", "no", "off":
+		return false
+	default:
+		return fallback
 	}
 }
 
