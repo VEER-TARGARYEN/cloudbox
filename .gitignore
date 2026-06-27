@@ -33,6 +33,10 @@ yarn-error.*
 *.keystore
 *.jks
 
+# Design reference: keep DESIGN.md, ignore bulky exports
+/design/_extracted/
+/design/*.zip
+
 # ───────────── Editor / OS ─────────────
 .DS_Store
 .idea/

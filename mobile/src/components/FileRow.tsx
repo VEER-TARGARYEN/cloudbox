@@ -1,25 +1,30 @@
 import React from 'react';
 import { ActivityIndicator, Pressable, StyleSheet, Text, View } from 'react-native';
+import { Feather } from '@expo/vector-icons';
 
 import { type FileItem } from '../api/client';
-import { fileEmoji, formatBytes, formatDate } from '../utils/format';
-import { colors, radius, spacing } from '../theme';
+import { fileVisual } from '../utils/fileType';
+import { formatBytes, formatDate } from '../utils/format';
+import { colors, font, radius, spacing } from '../theme';
 
 interface Props {
   file: FileItem;
   busy?: boolean; // true while this row is downloading
-  onPress: () => void; // tap to download + open
-  onDelete: () => void;
+  onPress: () => void; // open the actions sheet
 }
 
-export function FileRow({ file, busy = false, onPress, onDelete }: Props) {
+// A card row: 40px circular tinted type-icon, name, "size · date", kebab.
+export function FileRow({ file, busy = false, onPress }: Props) {
+  const v = fileVisual(file.mime_type);
+
   return (
     <Pressable
       onPress={onPress}
-      disabled={busy}
       style={({ pressed }) => [styles.row, pressed && styles.pressed]}
     >
-      <Text style={styles.icon}>{fileEmoji(file.mime_type)}</Text>
+      <View style={[styles.iconCircle, { backgroundColor: v.bg }]}>
+        <Feather name={v.icon} size={20} color={v.fg} />
+      </View>
 
       <View style={styles.meta}>
         <Text style={styles.name} numberOfLines={1}>
@@ -31,11 +36,9 @@ export function FileRow({ file, busy = false, onPress, onDelete }: Props) {
       </View>
 
       {busy ? (
-        <ActivityIndicator color={colors.primary} />
+        <ActivityIndicator color={colors.primary} style={styles.trailing} />
       ) : (
-        <Pressable onPress={onDelete} hitSlop={12} style={styles.delete}>
-          <Text style={styles.deleteText}>✕</Text>
-        </Pressable>
+        <Feather name="more-vertical" size={20} color={colors.textFaint} style={styles.trailing} />
       )}
     </Pressable>
   );
@@ -45,24 +48,25 @@ const styles = StyleSheet.create({
   row: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: colors.surface,
+    backgroundColor: colors.card,
     borderWidth: 1,
     borderColor: colors.border,
-    borderRadius: radius.md,
-    padding: spacing(1.5),
-    marginBottom: spacing(1),
+    borderRadius: radius.lg,
+    paddingVertical: spacing(3),
+    paddingHorizontal: spacing(3),
+    marginBottom: spacing(3),
   },
-  pressed: { opacity: 0.7 },
-  icon: { fontSize: 26, marginRight: spacing(1.5) },
-  meta: { flex: 1, marginRight: spacing(1) },
-  name: { color: colors.text, fontSize: 16, fontWeight: '600' },
-  sub: { color: colors.muted, fontSize: 13, marginTop: 2 },
-  delete: {
-    width: 32,
-    height: 32,
+  pressed: { backgroundColor: colors.surfaceLow },
+  iconCircle: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
     alignItems: 'center',
     justifyContent: 'center',
-    borderRadius: 16,
+    marginRight: spacing(3),
   },
-  deleteText: { color: colors.muted, fontSize: 16, fontWeight: '700' },
+  meta: { flex: 1, marginRight: spacing(2) },
+  name: { fontFamily: font.semibold, fontSize: 16, color: colors.text },
+  sub: { fontFamily: font.medium, fontSize: 13, color: colors.textFaint, marginTop: 2 },
+  trailing: { width: 24, textAlign: 'center' },
 });

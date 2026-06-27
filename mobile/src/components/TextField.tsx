@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import {
   StyleSheet,
   Text,
@@ -6,44 +6,88 @@ import {
   type TextInputProps,
   View,
 } from 'react-native';
+import { Feather } from '@expo/vector-icons';
 
-import { colors, radius, spacing } from '../theme';
+import { colors, font, radius, spacing } from '../theme';
 
-// A labelled input. Extends TextInputProps so callers can pass any native prop
-// (secureTextEntry, keyboardType, autoCapitalize, value, onChangeText, ...).
+type FeatherName = React.ComponentProps<typeof Feather>['name'];
+
 interface Props extends TextInputProps {
-  label: string;
+  label?: string;
+  hint?: string;
+  leftIcon?: FeatherName;
+  rightSlot?: React.ReactNode; // e.g. a show/hide password toggle
 }
 
-export function TextField({ label, style, ...rest }: Props) {
+// Filled input with a hairline border that turns indigo on focus. Supports an
+// optional label, helper hint, leading icon, and a trailing slot.
+export function TextField({ label, hint, leftIcon, rightSlot, style, ...rest }: Props) {
+  const [focused, setFocused] = useState(false);
+
   return (
     <View style={styles.wrap}>
-      <Text style={styles.label}>{label}</Text>
-      <TextInput
-        placeholderTextColor={colors.muted}
-        style={[styles.input, style]}
-        {...rest}
-      />
+      {label ? <Text style={styles.label}>{label}</Text> : null}
+
+      <View style={[styles.field, focused && styles.fieldFocused]}>
+        {leftIcon ? (
+          <Feather name={leftIcon} size={20} color={colors.textFaint} style={styles.leftIcon} />
+        ) : null}
+
+        <TextInput
+          placeholderTextColor={colors.textFaint}
+          style={[styles.input, style]}
+          onFocus={(e) => {
+            setFocused(true);
+            rest.onFocus?.(e);
+          }}
+          onBlur={(e) => {
+            setFocused(false);
+            rest.onBlur?.(e);
+          }}
+          {...rest}
+        />
+
+        {rightSlot ? <View style={styles.rightSlot}>{rightSlot}</View> : null}
+      </View>
+
+      {hint ? <Text style={styles.hint}>{hint}</Text> : null}
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  wrap: { marginBottom: spacing(2) },
+  wrap: { marginBottom: spacing(4) },
   label: {
-    color: colors.muted,
-    marginBottom: spacing(0.5),
-    fontSize: 13,
-    fontWeight: '600',
+    fontFamily: font.semibold,
+    fontSize: 14,
+    color: colors.text,
+    marginBottom: spacing(2),
   },
-  input: {
-    backgroundColor: colors.surface,
+  field: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: colors.card,
     borderWidth: 1,
     borderColor: colors.border,
-    borderRadius: radius.md,
-    color: colors.text,
-    paddingHorizontal: spacing(1.5),
-    height: 50,
+    borderRadius: radius.lg,
+    height: 56,
+    paddingHorizontal: spacing(4),
+  },
+  fieldFocused: { borderColor: colors.primary },
+  leftIcon: { marginRight: spacing(3) },
+  input: {
+    flex: 1,
+    fontFamily: font.regular,
     fontSize: 16,
+    color: colors.text,
+    padding: 0, // remove Android default vertical padding
+  },
+  rightSlot: { marginLeft: spacing(3) },
+  hint: {
+    fontFamily: font.medium,
+    fontSize: 12,
+    color: colors.textFaint,
+    marginTop: spacing(2),
+    marginLeft: spacing(1),
   },
 });

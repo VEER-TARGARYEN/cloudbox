@@ -1,6 +1,6 @@
-// Tiny display helpers shared by the file list.
+// Display helpers shared by the file list.
 
-// 1536 -> "1.5 KB", 1048576 -> "1 MB". Whole numbers for B and large units.
+// 1536 -> "1.5 KB", 1048576 -> "1 MB".
 export function formatBytes(n: number): string {
   if (!Number.isFinite(n) || n < 0) return '';
   if (n < 1024) return `${n} B`;
@@ -14,26 +14,32 @@ export function formatBytes(n: number): string {
   return `${value.toFixed(value >= 10 ? 0 : 1)} ${units[i]}`;
 }
 
-// ISO timestamp -> localized short date, e.g. "Jun 26, 2026".
+// ISO timestamp -> "Today, 09:41", "Yesterday", or "Jun 26".
 export function formatDate(iso: string): string {
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return '';
-  return d.toLocaleDateString(undefined, {
-    year: 'numeric',
-    month: 'short',
-    day: 'numeric',
-  });
+
+  const now = new Date();
+  const sameDay = (a: Date, b: Date) =>
+    a.getFullYear() === b.getFullYear() &&
+    a.getMonth() === b.getMonth() &&
+    a.getDate() === b.getDate();
+
+  const yesterday = new Date(now);
+  yesterday.setDate(now.getDate() - 1);
+
+  if (sameDay(d, now)) {
+    return `Today, ${d.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })}`;
+  }
+  if (sameDay(d, yesterday)) return 'Yesterday';
+  return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
 }
 
-// A quick visual cue for the file type, derived from its MIME type.
-export function fileEmoji(mime: string): string {
-  if (mime.startsWith('image/')) return '🖼️';
-  if (mime.startsWith('video/')) return '🎬';
-  if (mime.startsWith('audio/')) return '🎵';
-  if (mime === 'application/pdf') return '📄';
-  if (mime.startsWith('text/')) return '📃';
-  if (mime.includes('zip') || mime.includes('compressed') || mime.includes('tar')) {
-    return '🗜️';
-  }
-  return '📦';
+// Short MIME label for the file-actions sheet, e.g. "application/pdf" -> "PDF".
+export function mimeLabel(mime: string): string {
+  if (!mime) return 'File';
+  if (mime === 'application/pdf') return 'PDF';
+  const [type, sub] = mime.split('/');
+  if (sub && sub.length <= 5) return sub.toUpperCase();
+  return type ? type.toUpperCase() : 'File';
 }

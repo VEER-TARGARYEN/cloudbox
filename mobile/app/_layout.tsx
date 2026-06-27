@@ -3,25 +3,36 @@ import { Stack, useRouter, useSegments } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { ActivityIndicator, StyleSheet, View } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
+import {
+  useFonts,
+  Inter_400Regular,
+  Inter_500Medium,
+  Inter_600SemiBold,
+  Inter_700Bold,
+  Inter_800ExtraBold,
+} from '@expo-google-fonts/inter';
 
 import { AuthProvider, useAuth } from '../src/auth/AuthContext';
 import { colors } from '../src/theme';
 
-// The router-level auth guard. It watches the current route group and the auth
-// state, then redirects so that:
-//   - logged-OUT users are forced into the (auth) group (login/register)
-//   - logged-IN users are kept out of (auth) and sent to the dashboard
-// expo-router renders the matched screen; this just steers which one is allowed.
+function Splash() {
+  return (
+    <View style={styles.center}>
+      <ActivityIndicator size="large" color={colors.primary} />
+    </View>
+  );
+}
+
+// Router-level auth guard: logged-out users are forced into (auth); logged-in
+// users are kept out of it and sent to the Files tab.
 function RootNavigator() {
   const { user, initializing } = useAuth();
   const segments = useSegments();
   const router = useRouter();
 
   useEffect(() => {
-    if (initializing) return; // wait until we've restored any saved session
-
+    if (initializing) return;
     const inAuthGroup = segments[0] === '(auth)';
-
     if (!user && !inAuthGroup) {
       router.replace('/login');
     } else if (user && inAuthGroup) {
@@ -29,27 +40,41 @@ function RootNavigator() {
     }
   }, [user, initializing, segments, router]);
 
-  // While restoring the session, show a centered spinner instead of flashing
-  // the login screen for a frame.
-  if (initializing) {
-    return (
-      <View style={styles.center}>
-        <ActivityIndicator size="large" color={colors.primary} />
-      </View>
-    );
-  }
+  if (initializing) return <Splash />;
 
-  return <Stack screenOptions={{ headerShown: false }} />;
+  return (
+    <Stack
+      screenOptions={{
+        headerShown: false,
+        contentStyle: { backgroundColor: colors.background },
+      }}
+    />
+  );
 }
 
-// The true root: providers wrap everything, then the guard runs inside them.
 export default function RootLayout() {
+  // Load Inter (the design font) before rendering, to avoid a flash of the
+  // system font. We gate on (loaded OR error) so that if the fonts ever fail
+  // to load, the app still renders (falling back to the system font) instead
+  // of hanging on the splash forever.
+  const [fontsLoaded, fontError] = useFonts({
+    Inter_400Regular,
+    Inter_500Medium,
+    Inter_600SemiBold,
+    Inter_700Bold,
+    Inter_800ExtraBold,
+  });
+
   return (
     <SafeAreaProvider>
-      <AuthProvider>
-        <StatusBar style="light" />
-        <RootNavigator />
-      </AuthProvider>
+      <StatusBar style="dark" />
+      {fontsLoaded || fontError ? (
+        <AuthProvider>
+          <RootNavigator />
+        </AuthProvider>
+      ) : (
+        <Splash />
+      )}
     </SafeAreaProvider>
   );
 }
@@ -59,6 +84,6 @@ const styles = StyleSheet.create({
     flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: colors.bg,
+    backgroundColor: colors.background,
   },
 });

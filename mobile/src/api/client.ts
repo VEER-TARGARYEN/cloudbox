@@ -112,6 +112,7 @@ export const api = {
     token: string,
     asset: UploadAsset,
     onProgress?: (fraction: number) => void,
+    onCancelReady?: (cancel: () => void) => void,
   ) =>
     new Promise<FileItem>((resolve, reject) => {
       const form = new FormData();
@@ -151,6 +152,11 @@ export const api = {
       };
 
       xhr.onerror = () => reject(new ApiError(0, 'Network error during upload'));
+      xhr.onabort = () => reject(new ApiError(0, 'Upload canceled'));
+
+      // Expose a cancel function to the caller (the upload progress sheet).
+      onCancelReady?.(() => xhr.abort());
+
       xhr.send(form);
     }),
 

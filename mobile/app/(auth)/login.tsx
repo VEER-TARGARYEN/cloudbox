@@ -1,18 +1,21 @@
 import { useState } from 'react';
 import { Link } from 'expo-router';
-import { Alert, StyleSheet, Text, View } from 'react-native';
+import { Alert, Pressable, StyleSheet, Text, View } from 'react-native';
+import { Feather } from '@expo/vector-icons';
 
 import { Screen } from '../../src/components/Screen';
 import { TextField } from '../../src/components/TextField';
 import { Button } from '../../src/components/Button';
+import { BrandMark } from '../../src/components/Logo';
 import { useAuth } from '../../src/auth/AuthContext';
 import { ApiError } from '../../src/api/client';
-import { colors, spacing } from '../../src/theme';
+import { colors, font, PAGE_PADDING, spacing, typography } from '../../src/theme';
 
 export default function LoginScreen() {
   const { signIn } = useAuth();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [show, setShow] = useState(false);
   const [loading, setLoading] = useState(false);
 
   const onSubmit = async () => {
@@ -23,11 +26,9 @@ export default function LoginScreen() {
     setLoading(true);
     try {
       await signIn(email.trim(), password);
-      // Success: the root guard sees `user` is set and redirects to the
-      // dashboard automatically — no navigation code needed here.
+      // Success: the root guard redirects to the Files tab automatically.
     } catch (e) {
-      const msg = e instanceof ApiError ? e.message : 'Something went wrong';
-      Alert.alert('Login failed', msg);
+      Alert.alert('Login failed', e instanceof ApiError ? e.message : 'Something went wrong');
     } finally {
       setLoading(false);
     }
@@ -35,31 +36,36 @@ export default function LoginScreen() {
 
   return (
     <Screen>
-      <View style={styles.center}>
-        <View style={styles.header}>
-          <Text style={styles.logo}>CloudBox</Text>
+      <View style={styles.container}>
+        <View style={styles.hero}>
+          <BrandMark />
+          <Text style={styles.title}>CloudBox</Text>
           <Text style={styles.subtitle}>Your files. Your laptop. Anywhere.</Text>
         </View>
 
         <TextField
-          label="Email"
+          placeholder="Email"
           value={email}
           onChangeText={setEmail}
           autoCapitalize="none"
           autoCorrect={false}
           keyboardType="email-address"
           autoComplete="email"
-          placeholder="you@example.com"
         />
         <TextField
-          label="Password"
+          placeholder="Password"
           value={password}
           onChangeText={setPassword}
-          secureTextEntry
-          placeholder="••••••••"
+          secureTextEntry={!show}
+          autoCapitalize="none"
+          rightSlot={
+            <Pressable onPress={() => setShow((s) => !s)} hitSlop={8}>
+              <Feather name={show ? 'eye-off' : 'eye'} size={20} color={colors.textFaint} />
+            </Pressable>
+          }
         />
 
-        <View style={{ height: spacing(1) }} />
+        <View style={{ height: spacing(2) }} />
         <Button label="Sign in" onPress={onSubmit} loading={loading} />
 
         <View style={styles.footer}>
@@ -74,11 +80,11 @@ export default function LoginScreen() {
 }
 
 const styles = StyleSheet.create({
-  center: { flex: 1, justifyContent: 'center' },
-  header: { marginBottom: spacing(4) },
-  logo: { color: colors.text, fontSize: 34, fontWeight: '800', letterSpacing: 0.5 },
-  subtitle: { color: colors.muted, fontSize: 15, marginTop: spacing(0.5) },
-  footer: { flexDirection: 'row', justifyContent: 'center', marginTop: spacing(3) },
-  muted: { color: colors.muted },
-  link: { color: colors.primary, fontWeight: '600' },
+  container: { flex: 1, justifyContent: 'center', paddingHorizontal: PAGE_PADDING },
+  hero: { alignItems: 'center', marginBottom: spacing(9) },
+  title: { ...typography.title, color: colors.text, marginTop: spacing(4) },
+  subtitle: { ...typography.body, color: colors.textMuted, marginTop: spacing(2) },
+  footer: { flexDirection: 'row', justifyContent: 'center', marginTop: spacing(6) },
+  muted: { ...typography.body, color: colors.textMuted },
+  link: { fontFamily: font.semibold, fontSize: 16, color: colors.primary },
 });

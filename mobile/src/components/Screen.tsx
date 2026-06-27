@@ -1,26 +1,32 @@
 import React, { type ReactNode } from 'react';
-import { KeyboardAvoidingView, Platform, StyleSheet, View } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { KeyboardAvoidingView, Platform, StyleSheet } from 'react-native';
+import { SafeAreaView, type Edge } from 'react-native-safe-area-context';
 
-import { colors, spacing } from '../theme';
+import { colors } from '../theme';
 
-// A consistent page frame: fills the screen, respects the device's safe areas
-// (notch / home indicator), and lifts content above the keyboard on iOS.
-export function Screen({ children }: { children: ReactNode }) {
+// A page frame: fills the screen with the app background, respects safe areas,
+// and lifts content above the keyboard on iOS. Children manage their own
+// horizontal padding (so headers/sheets can go full-bleed).
+export function Screen({
+  children,
+  edges = ['top', 'bottom'],
+}: {
+  children: ReactNode;
+  edges?: readonly Edge[];
+}) {
   return (
-    <SafeAreaView style={styles.safe} edges={['top', 'bottom']}>
+    <SafeAreaView style={styles.safe} edges={edges}>
       <KeyboardAvoidingView
         style={styles.flex}
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
       >
-        <View style={styles.content}>{children}</View>
+        {children}
       </KeyboardAvoidingView>
     </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
-  safe: { flex: 1, backgroundColor: colors.bg },
+  safe: { flex: 1, backgroundColor: colors.background },
   flex: { flex: 1 },
-  content: { flex: 1, padding: spacing(3) },
 });

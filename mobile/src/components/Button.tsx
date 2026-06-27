@@ -1,18 +1,18 @@
 import React from 'react';
 import { ActivityIndicator, Pressable, StyleSheet, Text } from 'react-native';
 
-import { colors, radius, spacing } from '../theme';
+import { colors, font, radius, spacing } from '../theme';
 
 interface Props {
   label: string;
   onPress: () => void;
   loading?: boolean;
   disabled?: boolean;
-  variant?: 'primary' | 'ghost';
+  variant?: 'primary' | 'secondary';
 }
 
-// A single button used everywhere. While `loading` it shows a spinner and
-// becomes unpressable, so a double-tap can't fire two requests.
+// Pill-shaped button. Primary = filled indigo; secondary = light indigo tint.
+// While `loading` it shows a spinner and is unpressable (blocks double-submit).
 export function Button({
   label,
   onPress,
@@ -20,7 +20,7 @@ export function Button({
   disabled = false,
   variant = 'primary',
 }: Props) {
-  const isGhost = variant === 'ghost';
+  const secondary = variant === 'secondary';
   const blocked = disabled || loading;
 
   return (
@@ -29,15 +29,15 @@ export function Button({
       disabled={blocked}
       style={({ pressed }) => [
         styles.base,
-        isGhost ? styles.ghost : styles.primary,
+        secondary ? styles.secondary : styles.primary,
         blocked && styles.blocked,
         pressed && styles.pressed,
       ]}
     >
       {loading ? (
-        <ActivityIndicator color={isGhost ? colors.primary : colors.primaryText} />
+        <ActivityIndicator color={secondary ? colors.primary : colors.onPrimary} />
       ) : (
-        <Text style={[styles.label, isGhost && styles.ghostLabel]}>{label}</Text>
+        <Text style={[styles.label, secondary && styles.labelSecondary]}>{label}</Text>
       )}
     </Pressable>
   );
@@ -45,16 +45,16 @@ export function Button({
 
 const styles = StyleSheet.create({
   base: {
-    height: 52,
-    borderRadius: radius.md,
+    height: 56,
+    borderRadius: radius.pill,
     alignItems: 'center',
     justifyContent: 'center',
-    paddingHorizontal: spacing(2),
+    paddingHorizontal: spacing(4),
   },
   primary: { backgroundColor: colors.primary },
-  ghost: { backgroundColor: 'transparent' },
-  pressed: { opacity: 0.85 },
+  secondary: { backgroundColor: colors.primaryTint },
+  pressed: { transform: [{ scale: 0.985 }], opacity: 0.95 },
   blocked: { opacity: 0.5 },
-  label: { color: colors.primaryText, fontSize: 16, fontWeight: '600' },
-  ghostLabel: { color: colors.primary },
+  label: { fontFamily: font.semibold, fontSize: 16, color: colors.onPrimary },
+  labelSecondary: { color: colors.primary },
 });
