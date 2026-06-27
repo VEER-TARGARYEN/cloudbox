@@ -57,7 +57,11 @@ interface RequestOptions {
 async function request<T>(path: string, options: RequestOptions = {}): Promise<T> {
   const { method = 'GET', body, token } = options;
 
-  const headers: Record<string, string> = {};
+  const headers: Record<string, string> = {
+    // Tell ngrok's free tier to skip its browser-warning interstitial so the
+    // app always gets the real JSON response (harmless on other hosts).
+    'ngrok-skip-browser-warning': 'true',
+  };
   if (body !== undefined) headers['Content-Type'] = 'application/json';
   if (token) headers['Authorization'] = `Bearer ${token}`;
 
@@ -126,6 +130,7 @@ export const api = {
       const xhr = new XMLHttpRequest();
       xhr.open('POST', `${API_BASE_URL}/upload`);
       xhr.setRequestHeader('Authorization', `Bearer ${token}`);
+      xhr.setRequestHeader('ngrok-skip-browser-warning', 'true');
       // IMPORTANT: do NOT set Content-Type. XHR generates the multipart
       // boundary from FormData; overriding it corrupts the request body.
 
@@ -171,7 +176,7 @@ export const api = {
     const res = await LegacyFileSystem.downloadAsync(
       `${API_BASE_URL}/files/${file.id}/download`,
       target,
-      { headers: { Authorization: `Bearer ${token}` } },
+      { headers: { Authorization: `Bearer ${token}`, 'ngrok-skip-browser-warning': 'true' } },
     );
 
     if (res.status >= 400) {

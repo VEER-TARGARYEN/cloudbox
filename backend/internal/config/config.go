@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"strconv"
+	"strings"
 )
 
 // Config holds every tunable the server needs. We read it once at startup so
@@ -19,6 +20,11 @@ type Config struct {
 // Load reads configuration from environment variables, falling back to sane
 // local-development defaults when a variable is unset.
 func Load() Config {
+	// Load ./.env first (if present) so local dev can keep a stable JWT_SECRET
+	// etc. Real environment variables always win, so production (Render/Docker)
+	// is unaffected.
+	loadDotEnv(".env")
+
 	return Config{
 		Port:           getenv("PORT", "8080"),
 		DatabaseURL:    getenv("DATABASE_URL", "./data/cloudbox.db"),
@@ -44,4 +50,30 @@ func getenvInt64(key string, fallback int64) int64 {
 		}
 	}
 	return fallback
+}
+
+// loadDotEnv reads simple KEY=VALUE lines from path into the process
+// environment, WITHOUT overriding variables that are already set (so real env
+// vars stay authoritative). A missing file is not an error. Lines starting with
+// '#' and blank lines are ignored; surrounding quotes on values are stripped.
+func loadDotEnv(path string) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return
+	}
+	for _, line := range strings.Split(string(data), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		key, val, ok := strings.Cut(line, "=")
+		if !ok {
+			continue
+		}
+		key = strings.TrimSpace(key)
+		val = strings.Trim(strings.TrimSpace(val), `"'`)
+		if _, exists := os.LookupEnv(key); !exists {
+			_ = os.Setenv(key, val)
+		}
+	}
 }
