@@ -17,6 +17,13 @@ type Config struct {
 	MaxUploadBytes int64    // largest single upload we accept (bytes)
 	FSAllowRoots   []string // restrict host filesystem access to these roots (empty = all)
 	FSReadOnly     bool     // disable writes to the host filesystem
+
+	// Optional cloud-broker link (device pairing). All four must be set to enable.
+	BrokerURL      string
+	BrokerEmail    string
+	BrokerPassword string
+	PublicURL      string // this laptop's current public (tunnel) URL
+	DeviceName     string
 }
 
 // Load reads configuration from environment variables, falling back to sane
@@ -35,6 +42,11 @@ func Load() Config {
 		MaxUploadBytes: getenvInt64("MAX_UPLOAD_BYTES", 2<<30), // 2 GiB
 		FSAllowRoots:   getenvList("FS_ALLOW_ROOTS"),
 		FSReadOnly:     getenvBool("FS_READONLY", false),
+		BrokerURL:      getenv("BROKER_URL", ""),
+		BrokerEmail:    getenv("BROKER_EMAIL", ""),
+		BrokerPassword: getenv("BROKER_PASSWORD", ""),
+		PublicURL:      getenv("PUBLIC_URL", ""),
+		DeviceName:     getenv("DEVICE_NAME", "My Laptop"),
 	}
 }
 

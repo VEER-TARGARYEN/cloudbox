@@ -14,6 +14,7 @@ import (
 	chimw "github.com/go-chi/chi/v5/middleware"
 
 	"github.com/VEER-TARGARYEN/cloudbox/backend/internal/auth"
+	"github.com/VEER-TARGARYEN/cloudbox/backend/internal/brokerlink"
 	"github.com/VEER-TARGARYEN/cloudbox/backend/internal/config"
 	"github.com/VEER-TARGARYEN/cloudbox/backend/internal/database"
 	"github.com/VEER-TARGARYEN/cloudbox/backend/internal/fsbrowser"
@@ -59,6 +60,27 @@ func main() {
 		log.Printf("filesystem access: restricted to %v, read-only=%v", cfg.FSAllowRoots, cfg.FSReadOnly)
 	}
 
+	// Optional: link this laptop to a cloud broker for device pairing. Enabled
+	// only when all four broker settings are present (the launcher fills them in
+	// once it knows the tunnel URL).
+	if cfg.BrokerURL != "" && cfg.BrokerEmail != "" && cfg.BrokerPassword != "" && cfg.PublicURL != "" {
+		brokerAuth := brokerlink.NewAuth()
+		h.Broker = brokerAuth
+		dataDir := filepath.Dir(cfg.DatabaseURL)
+		go brokerlink.Run(brokerlink.Opts{
+			BrokerURL:   cfg.BrokerURL,
+			Email:       cfg.BrokerEmail,
+			Password:    cfg.BrokerPassword,
+			DeviceName:  cfg.DeviceName,
+			PublicURL:   cfg.PublicURL,
+			PersistPath: filepath.Join(dataDir, "broker-device.json"),
+			QRPath:      filepath.Join(dataDir, "pair-qr.png"),
+		}, brokerAuth)
+		log.Printf("broker link enabled: %s (public URL %s)", cfg.BrokerURL, cfg.PublicURL)
+	} else {
+		log.Println("broker link disabled (set BROKER_URL/EMAIL/PASSWORD + PUBLIC_URL to enable)")
+	}
+
 	// 5. Build the router + global middleware.
 	//    NOTE: we deliberately do NOT add a blanket request timeout here. The
 	//    upload/download routes stream arbitrarily large files, and a fixed
@@ -74,6 +96,7 @@ func main() {
 	r.Get("/health", h.Health)
 	r.Post("/register", h.Register)
 	r.Post("/login", h.Login)
+	r.Post("/auth/broker", h.AuthBroker) // exchange a broker token for a laptop token
 
 	// 6b. Protected routes — Authenticator runs first; everything here requires
 	//     a valid Bearer token and gets the caller's user_id from the context.

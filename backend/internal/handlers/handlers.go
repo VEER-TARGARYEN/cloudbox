@@ -11,6 +11,12 @@ import (
 	"github.com/VEER-TARGARYEN/cloudbox/backend/internal/storage"
 )
 
+// BrokerVerifier validates a phone's broker token and returns its account ID.
+// Implemented by brokerlink.Auth; nil when this server isn't broker-linked.
+type BrokerVerifier interface {
+	Verify(token string) (string, error)
+}
+
 // Handler holds the dependencies every route needs. Route handlers are METHODS
 // on this struct, so they get their dependencies without reaching for
 // package-level globals — easy to test, easy to follow.
@@ -19,6 +25,7 @@ type Handler struct {
 	Tokens         *auth.TokenService
 	Store          *storage.Store     // file-blob persistence on disk
 	FS             *fsbrowser.Browser // real-filesystem browsing
+	Broker         BrokerVerifier     // optional cloud-broker token introspection
 	MaxUploadBytes int64              // per-upload size ceiling
 }
 

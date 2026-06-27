@@ -101,6 +101,19 @@ func (s *Store) GetAccountByEmail(email string) (Account, error) {
 	return a, err
 }
 
+func (s *Store) GetAccountByID(id string) (Account, error) {
+	var a Account
+	var verified int
+	err := s.db.QueryRow(
+		`SELECT id, email, password_hash, verified FROM accounts WHERE id = ?`, id,
+	).Scan(&a.ID, &a.Email, &a.PasswordHash, &verified)
+	if errors.Is(err, sql.ErrNoRows) {
+		return Account{}, ErrNotFound
+	}
+	a.Verified = verified == 1
+	return a, err
+}
+
 // VerifyAccount marks the account with the given token verified. Returns
 // ErrNotFound if the token doesn't match any account.
 func (s *Store) VerifyAccount(token string) error {

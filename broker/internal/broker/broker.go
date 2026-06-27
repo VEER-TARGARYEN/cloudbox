@@ -44,9 +44,10 @@ func (s *Server) Routes() http.Handler {
 	// Authenticated (broker session token)
 	r.Group(func(pr chi.Router) {
 		pr.Use(s.auth)
-		pr.Post("/devices", s.deviceRegister)             // laptop announces itself
-		pr.Post("/devices/{id}/heartbeat", s.deviceBeat)  // laptop updates its URL
-		pr.Get("/devices", s.deviceList)                  // phone lists linked laptops
+		pr.Get("/accounts/me", s.me)                     // token introspection (laptop uses this)
+		pr.Post("/devices", s.deviceRegister)            // laptop announces itself
+		pr.Post("/devices/{id}/heartbeat", s.deviceBeat) // laptop updates its URL
+		pr.Get("/devices", s.deviceList)                 // phone lists linked laptops
 	})
 	return r
 }
@@ -170,6 +171,17 @@ func (s *Server) login(w http.ResponseWriter, r *http.Request) {
 		"token":   tok,
 		"account": map[string]string{"id": acc.ID, "email": acc.Email},
 	})
+}
+
+// me returns the account behind the bearer token — used by a laptop to validate
+// a phone's broker token (token introspection).
+func (s *Server) me(w http.ResponseWriter, r *http.Request) {
+	acc, err := s.Store.GetAccountByID(accountID(r))
+	if err != nil {
+		respondError(w, http.StatusNotFound, "account not found")
+		return
+	}
+	respondJSON(w, http.StatusOK, map[string]string{"id": acc.ID, "email": acc.Email})
 }
 
 type deviceReq struct {
