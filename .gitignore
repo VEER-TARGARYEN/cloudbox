@@ -2,6 +2,7 @@
 # Never commit user data or the database
 /backend/storage/
 /backend/data/
+/broker/data/
 *.db
 *.db-shm
 *.db-wal
