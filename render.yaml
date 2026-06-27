@@ -1,30 +1,40 @@
-# Render Blueprint — OPTIONAL alternative to the Cloudflare Tunnel.
-# Deploys the Go API as a Docker web service. Push this repo to GitHub, then in
-# the Render dashboard: New → Blueprint → pick your repo.
+# Render Blueprint — deploys the CloudBox BROKER (the always-on cloud directory
+# that lets your phone find your laptop by account, with QR pairing).
 #
-# ⚠️  Free instances have an EPHEMERAL filesystem: uploaded files and the SQLite
-#     database are ERASED on every restart/redeploy, and the service sleeps
-#     after ~15 min idle. For durable storage, raise `plan` to a paid tier and
-#     uncomment the `disk:` block (a 5 GB disk mounted at /data).
+# Deploy: push this repo to GitHub, then in Render: New → Blueprint → pick repo.
+# Render builds broker/Dockerfile and gives you a public URL. PUBLIC_URL and PORT
+# are auto-detected on Render (RENDER_EXTERNAL_URL), so JWT_SECRET is all you set.
+#
+# ⚠️  Free tier filesystem is EPHEMERAL — accounts reset on restart/redeploy, and
+#     the service sleeps after ~15 min idle. Fine for testing. For durable
+#     accounts, raise `plan` to "starter" and uncomment the disk block.
+#
+# (The laptop FILE server is NOT deployed here — it runs on your laptop via the
+#  installer. This service is only the lightweight pairing directory.)
 services:
   - type: web
-    name: cloudbox-api
+    name: cloudbox-broker
     runtime: docker
-    dockerfilePath: ./backend/Dockerfile
-    dockerContext: ./backend
+    dockerfilePath: ./broker/Dockerfile
+    dockerContext: ./broker
     plan: free
     healthCheckPath: /health
     envVars:
       - key: JWT_SECRET
-        generateValue: true # Render generates a strong random secret for you
-      - key: DATABASE_URL
-        value: /data/cloudbox.db
-      - key: STORAGE_DIR
-        value: /data/storage
-      - key: MAX_UPLOAD_BYTES
-        value: "2147483648"
-    # --- Durable storage (requires a paid plan) ---
+        generateValue: true # Render generates a strong random secret
+      # Optional — real verification emails (otherwise links print to the logs):
+      # - key: SMTP_HOST
+      #   value: smtp.resend.com
+      # - key: SMTP_PORT
+      #   value: "587"
+      # - key: SMTP_USER
+      #   value: resend
+      # - key: SMTP_PASS
+      #   sync: false        # paste your provider API key in the dashboard
+      # - key: SMTP_FROM
+      #   value: no-reply@yourdomain.com
+    # --- Durable accounts (requires a paid plan) ---
     # disk:
-    #   name: cloudbox-data
+    #   name: broker-data
     #   mountPath: /data
-    #   sizeGB: 5
+    #   sizeGB: 1

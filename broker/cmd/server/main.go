@@ -30,7 +30,9 @@ func main() {
 	port := env("PORT", "9000")
 	dbPath := env("DATABASE_URL", "./data/broker.db")
 	jwtSecret := env("JWT_SECRET", "dev-only-broker-secret-change-me")
-	publicURL := env("PUBLIC_URL", "http://localhost:"+port)
+	// On Render, RENDER_EXTERNAL_URL is injected automatically, so verification
+	// links work out of the box without setting PUBLIC_URL.
+	publicURL := env("PUBLIC_URL", env("RENDER_EXTERNAL_URL", "http://localhost:"+port))
 
 	if dir := filepath.Dir(dbPath); dir != "" && dir != "." {
 		if err := os.MkdirAll(dir, 0o755); err != nil {
