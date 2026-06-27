@@ -77,10 +77,14 @@ func Open(path string) (*Store, error) {
 
 func (s *Store) Ping() error { return s.db.Ping() }
 
-func (s *Store) CreateAccount(id, email, passwordHash, verifyToken string) error {
+func (s *Store) CreateAccount(id, email, passwordHash, verifyToken string, verified bool) error {
+	v := 0
+	if verified {
+		v = 1
+	}
 	_, err := s.db.Exec(
-		`INSERT INTO accounts (id, email, password_hash, verify_token) VALUES (?, ?, ?, ?)`,
-		id, email, passwordHash, verifyToken,
+		`INSERT INTO accounts (id, email, password_hash, verify_token, verified) VALUES (?, ?, ?, ?, ?)`,
+		id, email, passwordHash, verifyToken, v,
 	)
 	if isUnique(err) {
 		return ErrConflict

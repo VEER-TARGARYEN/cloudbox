@@ -116,12 +116,21 @@ func (s *Server) register(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	verifyTok := uuid.NewString()
-	if err := s.Store.CreateAccount(uuid.NewString(), email, string(hash), verifyTok); err != nil {
+	// If no email provider is configured, auto-verify (you can't click a link
+	// we can't send). When SMTP is set up, require real verification.
+	autoVerify := !s.Mailer.Configured()
+	if err := s.Store.CreateAccount(uuid.NewString(), email, string(hash), verifyTok, autoVerify); err != nil {
 		if errors.Is(err, store.ErrConflict) {
 			respondError(w, http.StatusConflict, "an account with that email already exists")
 			return
 		}
 		respondError(w, http.StatusInternalServerError, "could not create account")
+		return
+	}
+	if autoVerify {
+		respondJSON(w, http.StatusCreated, map[string]string{
+			"message": "Account created. You can sign in now.",
+		})
 		return
 	}
 	s.Mailer.SendVerification(email, verifyTok)

@@ -16,6 +16,9 @@ func New(host, port, user, pass, from, publicURL string) *Mailer {
 	return &Mailer{host: host, port: port, user: user, pass: pass, from: from, publicURL: publicURL}
 }
 
+// Configured reports whether real email sending is set up (SMTP host present).
+func (m *Mailer) Configured() bool { return m.host != "" }
+
 // SendVerification emails (or logs) a verification link for the given token.
 func (m *Mailer) SendVerification(to, token string) {
 	link := fmt.Sprintf("%s/accounts/verify?token=%s", m.publicURL, token)
