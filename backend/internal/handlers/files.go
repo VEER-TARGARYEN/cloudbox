@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"path/filepath"
 	"strconv"
@@ -100,6 +101,7 @@ func (h *Handler) Upload(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
+		log.Printf("upload ok: user=%s name=%q size=%d type=%s", userID, file.OriginalName, file.SizeBytes, file.MimeType)
 		respondJSON(w, http.StatusCreated, file)
 		return
 	}
