@@ -27,20 +27,32 @@ export interface AuthResponse {
   user: User;
 }
 
-export interface FileItem {
-  id: string;
+// A real filesystem starting point (a drive or a shortcut folder).
+export interface FsRoot {
   name: string;
-  mime_type: string;
-  size_bytes: number;
-  created_at: string;
+  path: string;
 }
 
-interface ListFilesResponse {
-  count: number;
-  files: FileItem[];
+// One item in a directory listing.
+export interface FsEntry {
+  name: string;
+  path: string;
+  is_dir: boolean;
+  size: number;
+  mod_time: string;
 }
 
-// What the upload flow needs from a picked document.
+interface FsRootsResponse {
+  roots: FsRoot[];
+  read_only: boolean;
+}
+
+interface FsListResponse {
+  path: string;
+  entries: FsEntry[];
+}
+
+// What an upload needs from a picked document.
 export interface UploadAsset {
   uri: string;
   name: string;
@@ -64,15 +76,11 @@ interface RequestOptions {
   token?: string | null;
 }
 
-// One small wrapper around fetch that JSON calls go through: sets headers,
-// attaches the Bearer token, parses JSON, and turns non-2xx responses into a
-// typed ApiError carrying the server's {"error": "..."} message.
+// One small wrapper around fetch that JSON calls go through.
 async function request<T>(path: string, options: RequestOptions = {}): Promise<T> {
   const { method = 'GET', body, token } = options;
 
   const headers: Record<string, string> = {
-    // Tell ngrok's free tier to skip its browser-warning interstitial so the
-    // app always gets the real JSON response (harmless on other hosts).
     'ngrok-skip-browser-warning': 'true',
   };
   if (body !== undefined) headers['Content-Type'] = 'application/json';
@@ -98,11 +106,85 @@ async function request<T>(path: string, options: RequestOptions = {}): Promise<T
       data = null;
     }
   }
-
   if (!res.ok) {
     throw new ApiError(res.status, data?.error ?? `Request failed (${res.status})`);
   }
   return data as T;
+}
+
+// Shared native multipart upload: copies the picked file to a path named after
+// the original (so the server records the real filename), then streams it from
+// disk with progress + cancel. Returns the parsed JSON response body.
+async function uploadMultipart(
+  url: string,
+  token: string,
+  asset: UploadAsset,
+  onProgress?: (fraction: number) => void,
+  onCancelReady?: (cancel: () => void) => void,
+): Promise<any> {
+  const cacheDir = LegacyFileSystem.cacheDirectory ?? '';
+  const safeName = asset.name.replace(/[\\/:*?"<>|]/g, '_');
+  const dest = `${cacheDir}cb-upload-${Date.now()}-${safeName}`;
+  await LegacyFileSystem.copyAsync({ from: asset.uri, to: dest });
+
+  const task = LegacyFileSystem.createUploadTask(
+    url,
+    dest,
+    {
+      uploadType: LegacyFileSystem.FileSystemUploadType.MULTIPART,
+      fieldName: 'file', // MUST be "file"
+      mimeType: asset.mimeType ?? 'application/octet-stream',
+      headers: {
+        Authorization: `Bearer ${token}`,
+        'ngrok-skip-browser-warning': 'true',
+      },
+    },
+    (p) => {
+      if (onProgress && p.totalBytesExpectedToSend > 0) {
+        onProgress(p.totalBytesSent / p.totalBytesExpectedToSend);
+      }
+    },
+  );
+
+  onCancelReady?.(() => {
+    task.cancelAsync().catch(() => {});
+  });
+
+  let res;
+  try {
+    res = await task.uploadAsync();
+  } finally {
+    LegacyFileSystem.deleteAsync(dest, { idempotent: true }).catch(() => {});
+  }
+
+  if (!res) throw new ApiError(0, 'Upload canceled');
+  if (res.status < 200 || res.status >= 300) {
+    let message = `Upload failed (${res.status})`;
+    try {
+      message = JSON.parse(res.body).error ?? message;
+    } catch {
+      /* keep default */
+    }
+    throw new ApiError(res.status, message);
+  }
+  try {
+    return JSON.parse(res.body);
+  } catch {
+    throw new ApiError(res.status, 'Malformed server response');
+  }
+}
+
+// Shared authenticated download to the device cache; returns the local URI.
+async function downloadToCacheUrl(url: string, token: string, fileName: string): Promise<string> {
+  const safeName = fileName.replace(/[\\/:*?"<>|]/g, '_');
+  const target = `${LegacyFileSystem.cacheDirectory ?? ''}cb-dl-${Date.now()}-${safeName}`;
+  const res = await LegacyFileSystem.downloadAsync(url, target, {
+    headers: { Authorization: `Bearer ${token}`, 'ngrok-skip-browser-warning': 'true' },
+  });
+  if (res.status >= 400) {
+    throw new ApiError(res.status, `Download failed (${res.status})`);
+  }
+  return res.uri;
 }
 
 export const api = {
@@ -115,94 +197,31 @@ export const api = {
 
   me: (token: string) => request<User>('/me', { token }),
 
-  // ── Files ─────────────────────────────────────────────────────────────────
-  listFiles: (token: string) => request<ListFilesResponse>('/files', { token }),
+  // ── Real filesystem browser ─────────────────────────────────────────────────
+  fsRoots: (token: string) => request<FsRootsResponse>('/fs/roots', { token }),
 
-  deleteFile: (token: string, id: string) =>
-    request<null>(`/files/${id}`, { method: 'DELETE', token }),
+  fsList: (token: string, path: string) =>
+    request<FsListResponse>(`/fs/list?path=${encodeURIComponent(path)}`, { token }),
 
-  // Upload with expo-file-system's native multipart uploader. Unlike the RN
-  // XHR + FormData path (which can silently send an empty file on Android), this
-  // reads the bytes straight from disk in native code — reliable, with progress
-  // and cancel support.
-  uploadFile: async (
+  fsDownloadToCache: (token: string, entry: FsEntry): Promise<string> =>
+    downloadToCacheUrl(
+      `${baseUrl}/fs/download?path=${encodeURIComponent(entry.path)}`,
+      token,
+      entry.name,
+    ),
+
+  fsUpload: (
     token: string,
+    dirPath: string,
     asset: UploadAsset,
     onProgress?: (fraction: number) => void,
     onCancelReady?: (cancel: () => void) => void,
-  ): Promise<FileItem> => {
-    // Copy the picked file to a path named after the original file, so the
-    // multipart filename (the last path segment) is the real name.
-    const cacheDir = LegacyFileSystem.cacheDirectory ?? '';
-    const safeName = asset.name.replace(/[\\/:*?"<>|]/g, '_');
-    const dest = `${cacheDir}cb-upload-${Date.now()}-${safeName}`;
-    await LegacyFileSystem.copyAsync({ from: asset.uri, to: dest });
-
-    const task = LegacyFileSystem.createUploadTask(
-      `${baseUrl}/upload`,
-      dest,
-      {
-        uploadType: LegacyFileSystem.FileSystemUploadType.MULTIPART,
-        fieldName: 'file', // MUST be "file" — that's what the Go handler reads
-        mimeType: asset.mimeType ?? 'application/octet-stream',
-        headers: {
-          Authorization: `Bearer ${token}`,
-          'ngrok-skip-browser-warning': 'true',
-        },
-      },
-      (p) => {
-        if (onProgress && p.totalBytesExpectedToSend > 0) {
-          onProgress(p.totalBytesSent / p.totalBytesExpectedToSend);
-        }
-      },
-    );
-
-    // Expose a cancel function to the caller (the upload progress sheet).
-    onCancelReady?.(() => {
-      task.cancelAsync().catch(() => {});
-    });
-
-    let res;
-    try {
-      res = await task.uploadAsync();
-    } finally {
-      LegacyFileSystem.deleteAsync(dest, { idempotent: true }).catch(() => {});
-    }
-
-    if (!res) throw new ApiError(0, 'Upload canceled');
-    if (res.status < 200 || res.status >= 300) {
-      let message = `Upload failed (${res.status})`;
-      try {
-        message = JSON.parse(res.body).error ?? message;
-      } catch {
-        /* keep default */
-      }
-      throw new ApiError(res.status, message);
-    }
-    try {
-      return JSON.parse(res.body) as FileItem;
-    } catch {
-      throw new ApiError(res.status, 'Malformed server response');
-    }
-  },
-
-  // Download an owned file to the device cache (authenticated) and return its
-  // local file:// URI, ready to hand to the OS share/preview sheet. We use the
-  // legacy FileSystem API because its downloadAsync accepts custom headers,
-  // which we need to send the Bearer token.
-  downloadToCache: async (token: string, file: FileItem): Promise<string> => {
-    const safeName = file.name.replace(/[\\/:*?"<>|]/g, '_');
-    const target = `${LegacyFileSystem.cacheDirectory ?? ''}${file.id}-${safeName}`;
-
-    const res = await LegacyFileSystem.downloadAsync(
-      `${baseUrl}/files/${file.id}/download`,
-      target,
-      { headers: { Authorization: `Bearer ${token}`, 'ngrok-skip-browser-warning': 'true' } },
-    );
-
-    if (res.status >= 400) {
-      throw new ApiError(res.status, `Download failed (${res.status})`);
-    }
-    return res.uri;
-  },
+  ): Promise<FsEntry> =>
+    uploadMultipart(
+      `${baseUrl}/fs/upload?path=${encodeURIComponent(dirPath)}`,
+      token,
+      asset,
+      onProgress,
+      onCancelReady,
+    ),
 };

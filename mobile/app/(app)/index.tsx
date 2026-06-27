@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -8,7 +8,6 @@ import {
   RefreshControl,
   StyleSheet,
   Text,
-  TextInput,
   View,
 } from 'react-native';
 import { Feather } from '@expo/vector-icons';
@@ -17,27 +16,45 @@ import * as Sharing from 'expo-sharing';
 
 import { Screen } from '../../src/components/Screen';
 import { TopBar } from '../../src/components/TopBar';
-import { FileRow } from '../../src/components/FileRow';
+import { FsRow } from '../../src/components/FsRow';
 import { BottomSheet } from '../../src/components/BottomSheet';
 import { useAuth } from '../../src/auth/AuthContext';
-import { api, ApiError, type FileItem } from '../../src/api/client';
-import { fileVisual } from '../../src/utils/fileType';
-import { formatBytes, formatDate, mimeLabel } from '../../src/utils/format';
+import { api, ApiError, type FsEntry, type FsRoot } from '../../src/api/client';
+import { fileVisualByName, rootIcon } from '../../src/utils/fileType';
+import { formatBytes, formatDate } from '../../src/utils/format';
 import { colors, font, PAGE_PADDING, radius, spacing, typography } from '../../src/theme';
 
 type UploadState = { name: string; total?: number; pct: number };
 
-export default function FilesScreen() {
+// Last path segment, e.g. "C:\Users\me\Downloads" -> "Downloads".
+function baseName(p: string): string {
+  const n = p.replace(/[\\/]+$/, '');
+  const i = Math.max(n.lastIndexOf('\\'), n.lastIndexOf('/'));
+  return (i >= 0 ? n.slice(i + 1) : n) || p;
+}
+
+// Parent directory, or null when already at a drive root (-> back to roots).
+function parentPath(p: string): string | null {
+  const n = p.replace(/[\\/]+$/, '');
+  const i = Math.max(n.lastIndexOf('\\'), n.lastIndexOf('/'));
+  if (i < 0) return null;
+  const parent = n.slice(0, i);
+  if (/^[A-Za-z]:$/.test(parent)) return parent + '\\'; // drive root e.g. "C:\"
+  return parent || null;
+}
+
+export default function BrowserScreen() {
   const { user, token } = useAuth();
 
-  const [files, setFiles] = useState<FileItem[]>([]);
+  const [path, setPath] = useState<string | null>(null); // null = roots (My Laptop)
+  const [roots, setRoots] = useState<FsRoot[]>([]);
+  const [entries, setEntries] = useState<FsEntry[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [query, setQuery] = useState('');
   const [upload, setUpload] = useState<UploadState | null>(null);
-  const [busyId, setBusyId] = useState<string | null>(null);
-  const [selected, setSelected] = useState<FileItem | null>(null);
+  const [busyPath, setBusyPath] = useState<string | null>(null);
+  const [selected, setSelected] = useState<FsEntry | null>(null);
 
   const cancelUploadRef = useRef<null | (() => void)>(null);
 
@@ -45,17 +62,23 @@ export default function FilesScreen() {
     if (!token) return;
     try {
       setError(null);
-      const res = await api.listFiles(token);
-      setFiles(res.files);
+      if (path === null) {
+        const res = await api.fsRoots(token);
+        setRoots(res.roots);
+      } else {
+        const res = await api.fsList(token, path);
+        setEntries(res.entries);
+      }
     } catch (e) {
-      setError(e instanceof ApiError ? e.message : 'Could not load files');
+      setError(e instanceof ApiError ? e.message : 'Could not open this location');
     } finally {
       setLoading(false);
       setRefreshing(false);
     }
-  }, [token]);
+  }, [token, path]);
 
   useEffect(() => {
+    setLoading(true);
     load();
   }, [load]);
 
@@ -64,28 +87,28 @@ export default function FilesScreen() {
     load();
   }, [load]);
 
-  const filtered = useMemo(() => {
-    const q = query.trim().toLowerCase();
-    if (!q) return files;
-    return files.filter((f) => f.name.toLowerCase().includes(q));
-  }, [files, query]);
+  const goUp = useCallback(() => {
+    if (path !== null) setPath(parentPath(path));
+  }, [path]);
 
   const onUpload = useCallback(async () => {
+    if (path === null || !token) return;
     try {
       const picked = await DocumentPicker.getDocumentAsync({ copyToCacheDirectory: true });
-      if (picked.canceled || !token) return;
+      if (picked.canceled) return;
       const asset = picked.assets[0];
 
       setUpload({ name: asset.name, total: asset.size, pct: 0 });
-      const created = await api.uploadFile(
+      await api.fsUpload(
         token,
+        path,
         { uri: asset.uri, name: asset.name, mimeType: asset.mimeType },
         (f) => setUpload((u) => (u ? { ...u, pct: f } : u)),
         (cancel) => {
           cancelUploadRef.current = cancel;
         },
       );
-      setFiles((prev) => [created, ...prev]);
+      load(); // refresh the current folder
     } catch (e) {
       const canceled = e instanceof ApiError && /cancel/i.test(e.message);
       if (!canceled) {
@@ -95,78 +118,90 @@ export default function FilesScreen() {
       setUpload(null);
       cancelUploadRef.current = null;
     }
-  }, [token]);
+  }, [path, token, load]);
 
-  // Download to cache then hand the local file to the OS share/preview sheet.
-  const openFile = useCallback(
-    async (file: FileItem) => {
+  // Download a real file to cache, then hand it to the OS share/preview sheet.
+  const openEntry = useCallback(
+    async (entry: FsEntry) => {
       if (!token) return;
       setSelected(null);
       try {
-        setBusyId(file.id);
-        const uri = await api.downloadToCache(token, file);
+        setBusyPath(entry.path);
+        const uri = await api.fsDownloadToCache(token, entry);
         if (await Sharing.isAvailableAsync()) {
-          await Sharing.shareAsync(uri, { mimeType: file.mime_type, dialogTitle: file.name });
+          await Sharing.shareAsync(uri, { dialogTitle: entry.name });
         } else {
           Alert.alert('Downloaded', `Saved to:\n${uri}`);
         }
       } catch (e) {
         Alert.alert('Download failed', e instanceof ApiError ? e.message : 'Something went wrong');
       } finally {
-        setBusyId(null);
+        setBusyPath(null);
       }
     },
     [token],
   );
 
-  const deleteFile = useCallback(
-    (file: FileItem) => {
-      setSelected(null);
-      Alert.alert('Delete file', `Delete "${file.name}"? This can't be undone.`, [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Delete',
-          style: 'destructive',
-          onPress: async () => {
-            if (!token) return;
-            const snapshot = files;
-            setFiles((f) => f.filter((x) => x.id !== file.id));
-            try {
-              await api.deleteFile(token, file.id);
-            } catch (e) {
-              setFiles(snapshot);
-              Alert.alert('Delete failed', e instanceof ApiError ? e.message : 'Something went wrong');
-            }
-          },
-        },
-      ]);
-    },
-    [files, token],
-  );
+  const renderRow = (item: FsRoot | FsEntry) => {
+    // Roots have no is_dir field; treat them as folders.
+    if (!('is_dir' in item)) {
+      return (
+        <FsRow
+          title={item.name}
+          icon={rootIcon(item.name)}
+          iconBg={colors.primaryTint}
+          iconFg={colors.primary}
+          showChevron
+          onPress={() => setPath(item.path)}
+        />
+      );
+    }
+    if (item.is_dir) {
+      return (
+        <FsRow
+          title={item.name}
+          icon="folder"
+          iconBg={colors.primaryTint}
+          iconFg={colors.primary}
+          showChevron
+          onPress={() => setPath(item.path)}
+        />
+      );
+    }
+    const v = fileVisualByName(item.name);
+    return (
+      <FsRow
+        title={item.name}
+        subtitle={`${formatBytes(item.size)} · ${formatDate(item.mod_time)}`}
+        icon={v.icon}
+        iconBg={v.bg}
+        iconFg={v.fg}
+        busy={busyPath === item.path}
+        onPress={() => setSelected(item)}
+      />
+    );
+  };
+
+  const data: (FsRoot | FsEntry)[] = path === null ? roots : entries;
 
   return (
     <Screen edges={['top']}>
       <TopBar email={user?.email} />
 
-      <View style={styles.headerArea}>
-        <Text style={styles.title}>Your files</Text>
-        <Text style={styles.email}>{user?.email}</Text>
-
-        <View style={styles.search}>
-          <Feather name="search" size={18} color={colors.textFaint} />
-          <TextInput
-            value={query}
-            onChangeText={setQuery}
-            placeholder="Search files..."
-            placeholderTextColor={colors.textFaint}
-            style={styles.searchInput}
-            autoCapitalize="none"
-            autoCorrect={false}
-          />
-          {query.length > 0 && (
-            <Pressable onPress={() => setQuery('')} hitSlop={8}>
-              <Feather name="x" size={18} color={colors.textFaint} />
-            </Pressable>
+      <View style={styles.nav}>
+        {path !== null && (
+          <Pressable onPress={goUp} hitSlop={8} style={styles.back}>
+            <Feather name="chevron-left" size={26} color={colors.text} />
+          </Pressable>
+        )}
+        <View style={{ flex: 1 }}>
+          <Text style={styles.title} numberOfLines={1}>
+            {path === null ? 'My Laptop' : baseName(path)}
+          </Text>
+          {path !== null && (
+            <Text style={styles.path} numberOfLines={1}>
+              {path}
+            </Text>
           )}
         </View>
       </View>
@@ -189,41 +224,36 @@ export default function FilesScreen() {
         </View>
       ) : (
         <FlatList
-          data={filtered}
-          keyExtractor={(item) => item.id}
-          renderItem={({ item }) => (
-            <FileRow file={item} busy={busyId === item.id} onPress={() => setSelected(item)} />
-          )}
-          contentContainerStyle={
-            filtered.length === 0 ? styles.emptyWrap : styles.listContent
-          }
+          data={data}
+          keyExtractor={(item) => item.path}
+          renderItem={({ item }) => renderRow(item)}
+          contentContainerStyle={data.length === 0 ? styles.emptyWrap : styles.listContent}
           refreshControl={
             <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.primary} />
           }
           ListEmptyComponent={
             <View style={styles.empty}>
               <View style={styles.emptyIcon}>
-                <Feather name={query ? 'search' : 'upload-cloud'} size={26} color={colors.primary} />
+                <Feather name="folder" size={26} color={colors.primary} />
               </View>
-              <Text style={styles.emptyTitle}>{query ? 'No matches' : 'No files yet'}</Text>
-              <Text style={styles.emptyText}>
-                {query ? 'Try a different search.' : 'Tap the + button to upload your first file.'}
-              </Text>
+              <Text style={styles.emptyTitle}>This folder is empty</Text>
             </View>
           }
         />
       )}
 
-      {/* Floating upload button */}
-      <Pressable
-        onPress={onUpload}
-        disabled={!!upload}
-        style={({ pressed }) => [styles.fab, pressed && styles.fabPressed, !!upload && styles.fabDisabled]}
-      >
-        <Feather name="plus" size={26} color={colors.onPrimary} />
-      </Pressable>
+      {/* Upload into the current folder (only inside a folder) */}
+      {path !== null && (
+        <Pressable
+          onPress={onUpload}
+          disabled={!!upload}
+          style={({ pressed }) => [styles.fab, pressed && styles.fabPressed, !!upload && styles.fabDisabled]}
+        >
+          <Feather name="upload" size={24} color={colors.onPrimary} />
+        </Pressable>
+      )}
 
-      {/* Upload progress sheet (persistent bottom card while uploading) */}
+      {/* Upload progress sheet */}
       {upload && (
         <View style={styles.uploadSheet}>
           <View style={styles.handle} />
@@ -232,7 +262,7 @@ export default function FilesScreen() {
               <Feather name="upload-cloud" size={20} color={colors.primary} />
             </View>
             <View style={{ flex: 1 }}>
-              <Text style={styles.uploadTitle}>Uploading 1 file…</Text>
+              <Text style={styles.uploadTitle}>Uploading…</Text>
               <Text style={styles.uploadName} numberOfLines={1}>
                 {upload.name}
               </Text>
@@ -257,23 +287,14 @@ export default function FilesScreen() {
 
       {/* File actions sheet */}
       <BottomSheet visible={!!selected} onClose={() => setSelected(null)}>
-        {selected && <FileActions file={selected} onOpen={openFile} onDelete={deleteFile} />}
+        {selected && <FileActions entry={selected} onOpen={openEntry} />}
       </BottomSheet>
     </Screen>
   );
 }
 
-// ── File actions sheet body ────────────────────────────────────────────────
-function FileActions({
-  file,
-  onOpen,
-  onDelete,
-}: {
-  file: FileItem;
-  onOpen: (f: FileItem) => void;
-  onDelete: (f: FileItem) => void;
-}) {
-  const v = fileVisual(file.mime_type);
+function FileActions({ entry, onOpen }: { entry: FsEntry; onOpen: (e: FsEntry) => void }) {
+  const v = fileVisualByName(entry.name);
   return (
     <View>
       <View style={styles.sheetHeader}>
@@ -282,23 +303,17 @@ function FileActions({
         </View>
         <View style={{ flex: 1 }}>
           <Text style={styles.sheetName} numberOfLines={1}>
-            {file.name}
+            {entry.name}
           </Text>
           <Text style={styles.sheetMeta}>
-            {formatBytes(file.size_bytes)} · {mimeLabel(file.mime_type)} · {formatDate(file.created_at)}
+            {formatBytes(entry.size)} · {formatDate(entry.mod_time)}
           </Text>
         </View>
       </View>
-
       <View style={styles.divider} />
-
-      <SheetAction icon="external-link" label="Open" onPress={() => onOpen(file)} />
-      <SheetAction icon="download" label="Download" onPress={() => onOpen(file)} />
-      <SheetAction icon="share-2" label="Share" onPress={() => onOpen(file)} />
-
-      <View style={styles.divider} />
-
-      <SheetAction icon="trash-2" label="Delete" danger onPress={() => onDelete(file)} />
+      <SheetAction icon="external-link" label="Open" onPress={() => onOpen(entry)} />
+      <SheetAction icon="download" label="Download" onPress={() => onOpen(entry)} />
+      <SheetAction icon="share-2" label="Share" onPress={() => onOpen(entry)} />
     </View>
   );
 }
@@ -306,52 +321,42 @@ function FileActions({
 function SheetAction({
   icon,
   label,
-  danger = false,
   onPress,
 }: {
   icon: React.ComponentProps<typeof Feather>['name'];
   label: string;
-  danger?: boolean;
   onPress: () => void;
 }) {
-  const fg = danger ? colors.danger : colors.primary;
-  const bg = danger ? colors.dangerTint : colors.primaryTint;
   return (
     <Pressable
       onPress={onPress}
       style={({ pressed }) => [styles.action, pressed && { backgroundColor: colors.surfaceLow }]}
     >
-      <View style={[styles.actionIcon, { backgroundColor: bg }]}>
-        <Feather name={icon} size={18} color={fg} />
+      <View style={styles.actionIcon}>
+        <Feather name={icon} size={18} color={colors.primary} />
       </View>
-      <Text style={[styles.actionLabel, { color: danger ? colors.danger : colors.text }]}>{label}</Text>
+      <Text style={styles.actionLabel}>{label}</Text>
     </Pressable>
   );
 }
 
 const styles = StyleSheet.create({
-  headerArea: { paddingHorizontal: PAGE_PADDING, paddingTop: spacing(4) },
-  title: { ...typography.display, color: colors.text },
-  email: { ...typography.body, color: colors.textMuted, marginTop: spacing(1) },
-  search: {
+  nav: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: colors.card,
-    borderWidth: 1,
-    borderColor: colors.border,
-    borderRadius: radius.md,
-    height: 48,
-    paddingHorizontal: spacing(4),
-    marginTop: spacing(4),
-    gap: spacing(2),
+    paddingHorizontal: PAGE_PADDING,
+    paddingTop: spacing(3),
+    paddingBottom: spacing(2),
   },
-  searchInput: { flex: 1, fontFamily: font.regular, fontSize: 15, color: colors.text, padding: 0 },
+  back: { marginRight: spacing(2), marginLeft: -spacing(1) },
+  title: { ...typography.title, color: colors.text },
+  path: { fontFamily: font.medium, fontSize: 12, color: colors.textFaint, marginTop: 2 },
 
   center: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: spacing(6) },
   error: { ...typography.body, color: colors.danger, textAlign: 'center', marginBottom: spacing(2) },
   retry: { fontFamily: font.semibold, fontSize: 15, color: colors.primary },
 
-  listContent: { paddingHorizontal: PAGE_PADDING, paddingTop: spacing(4), paddingBottom: spacing(28) },
+  listContent: { paddingHorizontal: PAGE_PADDING, paddingTop: spacing(2), paddingBottom: spacing(28) },
   emptyWrap: { flexGrow: 1, justifyContent: 'center', paddingHorizontal: PAGE_PADDING },
   empty: { alignItems: 'center' },
   emptyIcon: {
@@ -364,7 +369,6 @@ const styles = StyleSheet.create({
     marginBottom: spacing(4),
   },
   emptyTitle: { ...typography.headline, color: colors.text },
-  emptyText: { ...typography.body, color: colors.textMuted, marginTop: spacing(1), textAlign: 'center' },
 
   fab: {
     position: 'absolute',
@@ -383,7 +387,7 @@ const styles = StyleSheet.create({
     elevation: 6,
   },
   fabPressed: { transform: [{ scale: 0.96 }] },
-  fabDisabled: { opacity: 0.5 },
+  fabDisabled: { opacity: 0.4 },
 
   uploadSheet: {
     position: 'absolute',
@@ -425,13 +429,12 @@ const styles = StyleSheet.create({
   track: { height: 6, borderRadius: 3, backgroundColor: colors.surfaceContainer, overflow: 'hidden' },
   fill: { height: 6, borderRadius: 3, backgroundColor: colors.primary },
 
-  // actions sheet
   sheetHeader: { flexDirection: 'row', alignItems: 'center', gap: spacing(3), marginBottom: spacing(3) },
   sheetIcon: { width: 48, height: 48, borderRadius: radius.md, alignItems: 'center', justifyContent: 'center' },
   sheetName: { fontFamily: font.bold, fontSize: 18, color: colors.text },
   sheetMeta: { fontFamily: font.medium, fontSize: 13, color: colors.textFaint, marginTop: 2 },
   divider: { height: 1, backgroundColor: colors.border, marginVertical: spacing(2) },
   action: { flexDirection: 'row', alignItems: 'center', gap: spacing(4), paddingVertical: spacing(3), borderRadius: radius.md, paddingHorizontal: spacing(2) },
-  actionIcon: { width: 40, height: 40, borderRadius: 20, alignItems: 'center', justifyContent: 'center' },
-  actionLabel: { fontFamily: font.medium, fontSize: 16 },
+  actionIcon: { width: 40, height: 40, borderRadius: 20, backgroundColor: colors.primaryTint, alignItems: 'center', justifyContent: 'center' },
+  actionLabel: { fontFamily: font.medium, fontSize: 16, color: colors.text },
 });
