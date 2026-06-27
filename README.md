@@ -83,7 +83,23 @@ cloudbox/
 └── README.md
 ```
 
-## 🚀 Quick start
+## 🖥️ Easiest: one-click Windows install
+
+Don't want the command line? Grab **`CloudBox-Setup.exe`** from the
+[Releases](https://github.com/VEER-TARGARYEN/cloudbox/releases) page and run it,
+then click **Start CloudBox**. It launches the server, opens a secure public
+tunnel, and shows a **Server URL** like `https://something.trycloudflare.com`.
+
+Install the **CloudBox app** (the `.apk` on the same Releases page), open it,
+paste that Server URL into the **Server** field, and register. Your files stay on
+your laptop under `%LOCALAPPDATA%\CloudBox`. Keep the window open while you use
+the app.
+
+> Because the app asks for your server URL on the login screen, **one APK works
+> against any CloudBox server** — no rebuilding. Build the installer yourself
+> from [`installer/`](installer/README.md).
+
+## 🚀 Quick start (run from source)
 
 ### Prerequisites
 - [Go](https://go.dev/dl/) 1.23+
@@ -171,7 +187,7 @@ When it finishes, EAS prints a download link to a `.apk`. Download it, then on y
 gh release create v1.0.0 cloudbox.apk --title "CloudBox v1.0.0" --notes "First release"
 ```
 
-> Make sure `EXPO_PUBLIC_API_URL` points at your tunnel/Render URL **before** building, since it's inlined into the binary.
+> You **don't** need to bake in a server URL — the app asks for it on the login screen and saves it on the device, so one APK works with any server. `EXPO_PUBLIC_API_URL` only sets an optional default to prefill that field.
 
 ## 📡 API reference
 

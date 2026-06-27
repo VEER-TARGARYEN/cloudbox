@@ -37,6 +37,10 @@ yarn-error.*
 /design/_extracted/
 /design/*.zip
 
+# Installer build artifacts (CloudBox-Setup.exe ships via GitHub Releases)
+/installer/dist/
+/installer/Output/
+
 # ───────────── Editor / OS ─────────────
 .DS_Store
 .idea/
