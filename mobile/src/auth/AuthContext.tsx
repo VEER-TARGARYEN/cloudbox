@@ -7,66 +7,94 @@ import React, {
   type ReactNode,
 } from 'react';
 
-import { api, type User } from '../api/client';
-import { deleteToken, getToken, saveToken } from '../storage/secureStore';
+import { api, setApiBaseUrl, type User } from '../api/client';
+import { DEFAULT_API_BASE_URL } from '../config';
+import {
+  deleteToken,
+  getServerUrl,
+  getToken,
+  saveServerUrl,
+  saveToken,
+} from '../storage/secureStore';
 
-// The shape every screen can consume via useAuth().
 interface AuthState {
   user: User | null;
   token: string | null;
-  initializing: boolean; // true while we restore a saved session at startup
-  signIn: (email: string, password: string) => Promise<void>;
-  signUp: (email: string, password: string) => Promise<void>;
+  serverUrl: string; // the CloudBox server this device is connected to
+  initializing: boolean;
+  signIn: (serverUrl: string, email: string, password: string) => Promise<void>;
+  signUp: (serverUrl: string, email: string, password: string) => Promise<void>;
   signOut: () => Promise<void>;
 }
 
 const AuthContext = createContext<AuthState | undefined>(undefined);
 
+// Normalize a user-entered server URL: trim, default to https, strip trailing /.
+function normalizeUrl(raw: string): string {
+  let url = raw.trim();
+  if (!url) return '';
+  if (!/^https?:\/\//i.test(url)) url = `https://${url}`;
+  return url.replace(/\/+$/, '');
+}
+
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [token, setToken] = useState<string | null>(null);
+  const [serverUrl, setServerUrl] = useState<string>(DEFAULT_API_BASE_URL);
   const [initializing, setInitializing] = useState(true);
 
-  // On startup: restore a token from secure storage and validate it by calling
-  // /me. If it's missing or rejected (expired/tampered), we stay logged out.
+  // On startup: restore the saved server URL + token and validate the session.
   useEffect(() => {
     (async () => {
       try {
+        const savedServer = (await getServerUrl()) || DEFAULT_API_BASE_URL;
+        if (savedServer) {
+          setServerUrl(savedServer);
+          setApiBaseUrl(savedServer);
+        }
+
         const saved = await getToken();
-        if (saved) {
-          const me = await api.me(saved); // throws ApiError(401) if invalid
+        if (saved && savedServer) {
+          const me = await api.me(saved); // throws if invalid/unreachable
           setToken(saved);
           setUser(me);
         }
       } catch {
-        await deleteToken(); // clear a stale/invalid token
+        await deleteToken(); // stale/invalid token, or server unreachable
       } finally {
         setInitializing(false);
       }
     })();
   }, []);
 
-  // Shared "we now have a valid session" path for both sign-in and sign-up.
-  const persistSession = useCallback(async (newToken: string, newUser: User) => {
-    await saveToken(newToken);
-    setToken(newToken);
-    setUser(newUser);
-  }, []);
+  // Point the client at the given server, persist it, then run an auth call.
+  const connectAndAuth = useCallback(
+    async (rawServer: string, run: () => Promise<{ token: string; user: User }>) => {
+      const url = normalizeUrl(rawServer);
+      if (!url) throw new Error('Enter your server URL');
+
+      setApiBaseUrl(url);
+      const res = await run();
+
+      await saveServerUrl(url);
+      await saveToken(res.token);
+      setServerUrl(url);
+      setToken(res.token);
+      setUser(res.user);
+    },
+    [],
+  );
 
   const signIn = useCallback(
-    async (email: string, password: string) => {
-      const res = await api.login(email, password);
-      await persistSession(res.token, res.user);
-    },
-    [persistSession],
+    (server: string, email: string, password: string) =>
+      connectAndAuth(server, () => api.login(email, password)),
+    [connectAndAuth],
   );
 
   const signUp = useCallback(
-    async (email: string, password: string) => {
-      const res = await api.register(email, password);
-      await persistSession(res.token, res.user);
-    },
-    [persistSession],
+    (server: string, email: string, password: string) =>
+      connectAndAuth(server, () => api.register(email, password)),
+    [connectAndAuth],
   );
 
   const signOut = useCallback(async () => {
@@ -77,15 +105,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   return (
     <AuthContext.Provider
-      value={{ user, token, initializing, signIn, signUp, signOut }}
+      value={{ user, token, serverUrl, initializing, signIn, signUp, signOut }}
     >
       {children}
     </AuthContext.Provider>
   );
 }
 
-// Typed hook with a guard: using it outside <AuthProvider> is a programming
-// error, so we fail loudly instead of returning undefined.
 export function useAuth(): AuthState {
   const ctx = useContext(AuthContext);
   if (!ctx) {

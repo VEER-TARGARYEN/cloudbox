@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { Link } from 'expo-router';
-import { Alert, Pressable, StyleSheet, Text, View } from 'react-native';
+import { Alert, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { Feather } from '@expo/vector-icons';
 
 import { Screen } from '../../src/components/Screen';
@@ -8,27 +8,30 @@ import { TextField } from '../../src/components/TextField';
 import { Button } from '../../src/components/Button';
 import { BrandMark } from '../../src/components/Logo';
 import { useAuth } from '../../src/auth/AuthContext';
-import { ApiError } from '../../src/api/client';
 import { colors, font, PAGE_PADDING, spacing, typography } from '../../src/theme';
 
 export default function LoginScreen() {
-  const { signIn } = useAuth();
+  const { signIn, serverUrl } = useAuth();
+  const [server, setServer] = useState(serverUrl);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [show, setShow] = useState(false);
   const [loading, setLoading] = useState(false);
 
   const onSubmit = async () => {
+    if (!server.trim()) {
+      Alert.alert('Server needed', 'Enter the address of your CloudBox server.');
+      return;
+    }
     if (!email || !password) {
       Alert.alert('Missing info', 'Enter your email and password.');
       return;
     }
     setLoading(true);
     try {
-      await signIn(email.trim(), password);
-      // Success: the root guard redirects to the Files tab automatically.
+      await signIn(server, email.trim(), password);
     } catch (e) {
-      Alert.alert('Login failed', e instanceof ApiError ? e.message : 'Something went wrong');
+      Alert.alert('Login failed', e instanceof Error ? e.message : 'Something went wrong');
     } finally {
       setLoading(false);
     }
@@ -36,7 +39,11 @@ export default function LoginScreen() {
 
   return (
     <Screen>
-      <View style={styles.container}>
+      <ScrollView
+        contentContainerStyle={styles.container}
+        keyboardShouldPersistTaps="handled"
+        showsVerticalScrollIndicator={false}
+      >
         <View style={styles.hero}>
           <BrandMark />
           <Text style={styles.title}>CloudBox</Text>
@@ -44,7 +51,17 @@ export default function LoginScreen() {
         </View>
 
         <TextField
+          placeholder="your-server.ngrok-free.app"
+          leftIcon="server"
+          value={server}
+          onChangeText={setServer}
+          autoCapitalize="none"
+          autoCorrect={false}
+          keyboardType="url"
+        />
+        <TextField
           placeholder="Email"
+          leftIcon="mail"
           value={email}
           onChangeText={setEmail}
           autoCapitalize="none"
@@ -54,6 +71,7 @@ export default function LoginScreen() {
         />
         <TextField
           placeholder="Password"
+          leftIcon="lock"
           value={password}
           onChangeText={setPassword}
           secureTextEntry={!show}
@@ -74,14 +92,14 @@ export default function LoginScreen() {
             Create an account
           </Link>
         </View>
-      </View>
+      </ScrollView>
     </Screen>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, justifyContent: 'center', paddingHorizontal: PAGE_PADDING },
-  hero: { alignItems: 'center', marginBottom: spacing(9) },
+  container: { flexGrow: 1, justifyContent: 'center', paddingHorizontal: PAGE_PADDING, paddingVertical: spacing(8) },
+  hero: { alignItems: 'center', marginBottom: spacing(8) },
   title: { ...typography.title, color: colors.text, marginTop: spacing(4) },
   subtitle: { ...typography.body, color: colors.textMuted, marginTop: spacing(2) },
   footer: { flexDirection: 'row', justifyContent: 'center', marginTop: spacing(6) },

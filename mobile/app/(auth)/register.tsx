@@ -7,11 +7,11 @@ import { TextField } from '../../src/components/TextField';
 import { Button } from '../../src/components/Button';
 import { BrandWordmark } from '../../src/components/Logo';
 import { useAuth } from '../../src/auth/AuthContext';
-import { ApiError } from '../../src/api/client';
 import { colors, font, PAGE_PADDING, spacing, typography } from '../../src/theme';
 
 export default function RegisterScreen() {
-  const { signUp } = useAuth();
+  const { signUp, serverUrl } = useAuth();
+  const [server, setServer] = useState(serverUrl);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [confirm, setConfirm] = useState('');
@@ -19,6 +19,10 @@ export default function RegisterScreen() {
 
   const onSubmit = async () => {
     // Client-side checks mirror the server's rules for instant feedback.
+    if (!server.trim()) {
+      Alert.alert('Server needed', 'Enter the address of your CloudBox server.');
+      return;
+    }
     if (!email.includes('@')) {
       Alert.alert('Invalid email', 'Enter a valid email address.');
       return;
@@ -33,9 +37,9 @@ export default function RegisterScreen() {
     }
     setLoading(true);
     try {
-      await signUp(email.trim(), password);
+      await signUp(server, email.trim(), password);
     } catch (e) {
-      Alert.alert('Registration failed', e instanceof ApiError ? e.message : 'Something went wrong');
+      Alert.alert('Registration failed', e instanceof Error ? e.message : 'Something went wrong');
     } finally {
       setLoading(false);
     }
@@ -56,6 +60,16 @@ export default function RegisterScreen() {
         <Text style={styles.subtitle}>Start storing files on your own cloud.</Text>
 
         <View style={styles.form}>
+          <TextField
+            label="Server URL"
+            leftIcon="server"
+            placeholder="your-server.ngrok-free.app"
+            value={server}
+            onChangeText={setServer}
+            autoCapitalize="none"
+            autoCorrect={false}
+            keyboardType="url"
+          />
           <TextField
             label="Email"
             leftIcon="mail"

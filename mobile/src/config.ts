@@ -8,8 +8,10 @@
 // Expo inlines any variable prefixed with EXPO_PUBLIC_ at build time, so you can
 // override this without touching code:
 //   EXPO_PUBLIC_API_URL=https://your-tunnel.trycloudflare.com  (see .env.example)
-const FALLBACK = 'http://localhost:8080';
-
-export const API_BASE_URL = (
-  process.env.EXPO_PUBLIC_API_URL?.replace(/\/+$/, '') || FALLBACK
+// The server URL is now entered IN THE APP (see the Server field on the login
+// screen) and stored on the device, so one APK works against any CloudBox
+// server. EXPO_PUBLIC_API_URL is only an optional default to prefill that field
+// (handy for your own build); leave it unset for a generic, shareable APK.
+export const DEFAULT_API_BASE_URL = (
+  process.env.EXPO_PUBLIC_API_URL?.replace(/\/+$/, '') || ''
 );

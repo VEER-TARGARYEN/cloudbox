@@ -1,4 +1,5 @@
 import { StyleSheet, Text, View } from 'react-native';
+import { Feather } from '@expo/vector-icons';
 import Constants from 'expo-constants';
 
 import { Screen } from '../../src/components/Screen';
@@ -8,7 +9,7 @@ import { useAuth } from '../../src/auth/AuthContext';
 import { colors, font, PAGE_PADDING, radius, spacing, typography } from '../../src/theme';
 
 export default function SettingsScreen() {
-  const { user, signOut } = useAuth();
+  const { user, serverUrl, signOut } = useAuth();
   const initial = (user?.email?.trim()?.[0] ?? '?').toUpperCase();
   const version = Constants.expoConfig?.version ?? '1.0.0';
 
@@ -20,13 +21,25 @@ export default function SettingsScreen() {
         <Text style={styles.title}>Settings</Text>
 
         <View style={styles.card}>
-          <View style={styles.avatar}>
-            <Text style={styles.avatarText}>{initial}</Text>
+          <View style={styles.badge}>
+            <Text style={styles.badgeText}>{initial}</Text>
           </View>
           <View style={{ flex: 1 }}>
             <Text style={styles.cardLabel}>Signed in as</Text>
-            <Text style={styles.cardEmail} numberOfLines={1}>
+            <Text style={styles.cardValue} numberOfLines={1}>
               {user?.email}
+            </Text>
+          </View>
+        </View>
+
+        <View style={[styles.card, { marginTop: spacing(3) }]}>
+          <View style={styles.badge}>
+            <Feather name="server" size={20} color={colors.primary} />
+          </View>
+          <View style={{ flex: 1 }}>
+            <Text style={styles.cardLabel}>Connected server</Text>
+            <Text style={styles.cardValue} numberOfLines={1}>
+              {serverUrl || 'Not set'}
             </Text>
           </View>
         </View>
@@ -53,16 +66,16 @@ const styles = StyleSheet.create({
     borderRadius: radius.lg,
     padding: spacing(4),
   },
-  avatar: {
-    width: 52,
-    height: 52,
-    borderRadius: 26,
+  badge: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
     backgroundColor: colors.primaryTint,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  avatarText: { fontFamily: font.bold, fontSize: 20, color: colors.primary },
+  badgeText: { fontFamily: font.bold, fontSize: 19, color: colors.primary },
   cardLabel: { fontFamily: font.medium, fontSize: 13, color: colors.textFaint },
-  cardEmail: { fontFamily: font.semibold, fontSize: 16, color: colors.text, marginTop: 2 },
+  cardValue: { fontFamily: font.semibold, fontSize: 15, color: colors.text, marginTop: 2 },
   version: { fontFamily: font.medium, fontSize: 12, color: colors.textFaint, textAlign: 'center', marginTop: spacing(4) },
 });

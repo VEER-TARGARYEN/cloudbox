@@ -1,6 +1,19 @@
 import * as LegacyFileSystem from 'expo-file-system/legacy';
 
-import { API_BASE_URL } from '../config';
+import { DEFAULT_API_BASE_URL } from '../config';
+
+// Runtime-configurable base URL: set from the saved server URL at startup and
+// whenever the user signs in. This is what lets a single APK work against any
+// CloudBox server.
+let baseUrl = DEFAULT_API_BASE_URL;
+
+export function setApiBaseUrl(url: string) {
+  baseUrl = url.replace(/\/+$/, '');
+}
+
+export function getApiBaseUrl(): string {
+  return baseUrl;
+}
 
 // ── Types that mirror the Go API's JSON shapes ──────────────────────────────
 export interface User {
@@ -67,7 +80,7 @@ async function request<T>(path: string, options: RequestOptions = {}): Promise<T
 
   let res: Response;
   try {
-    res = await fetch(`${API_BASE_URL}${path}`, {
+    res = await fetch(`${baseUrl}${path}`, {
       method,
       headers,
       body: body !== undefined ? JSON.stringify(body) : undefined,
@@ -128,7 +141,7 @@ export const api = {
       } as any);
 
       const xhr = new XMLHttpRequest();
-      xhr.open('POST', `${API_BASE_URL}/upload`);
+      xhr.open('POST', `${baseUrl}/upload`);
       xhr.setRequestHeader('Authorization', `Bearer ${token}`);
       xhr.setRequestHeader('ngrok-skip-browser-warning', 'true');
       // IMPORTANT: do NOT set Content-Type. XHR generates the multipart
@@ -174,7 +187,7 @@ export const api = {
     const target = `${LegacyFileSystem.cacheDirectory ?? ''}${file.id}-${safeName}`;
 
     const res = await LegacyFileSystem.downloadAsync(
-      `${API_BASE_URL}/files/${file.id}/download`,
+      `${baseUrl}/files/${file.id}/download`,
       target,
       { headers: { Authorization: `Bearer ${token}`, 'ngrok-skip-browser-warning': 'true' } },
     );
