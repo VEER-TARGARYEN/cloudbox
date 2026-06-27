@@ -76,8 +76,9 @@ interface RequestOptions {
   token?: string | null;
 }
 
-// One small wrapper around fetch that JSON calls go through.
-async function request<T>(path: string, options: RequestOptions = {}): Promise<T> {
+// JSON request against an EXPLICIT base URL (used for broker calls, which target
+// a different host than the laptop).
+async function requestAt<T>(base: string, path: string, options: RequestOptions = {}): Promise<T> {
   const { method = 'GET', body, token } = options;
 
   const headers: Record<string, string> = {
@@ -88,7 +89,7 @@ async function request<T>(path: string, options: RequestOptions = {}): Promise<T
 
   let res: Response;
   try {
-    res = await fetch(`${baseUrl}${path}`, {
+    res = await fetch(`${base}${path}`, {
       method,
       headers,
       body: body !== undefined ? JSON.stringify(body) : undefined,
@@ -111,6 +112,48 @@ async function request<T>(path: string, options: RequestOptions = {}): Promise<T
   }
   return data as T;
 }
+
+// JSON request against the current laptop server.
+function request<T>(path: string, options: RequestOptions = {}): Promise<T> {
+  return requestAt<T>(baseUrl, path, options);
+}
+
+// ── Broker (cloud pairing directory) ────────────────────────────────────────
+export interface BrokerDevice {
+  id: string;
+  name: string;
+  url: string;
+  last_seen: string;
+}
+interface BrokerLoginResult {
+  token: string;
+  account: { id: string; email: string };
+}
+interface BrokerClaimResult {
+  token: string;
+  device: BrokerDevice;
+}
+
+export const broker = {
+  login: (brokerUrl: string, email: string, password: string) =>
+    requestAt<BrokerLoginResult>(brokerUrl, '/accounts/login', { method: 'POST', body: { email, password } }),
+
+  register: (brokerUrl: string, email: string, password: string) =>
+    requestAt<{ message: string }>(brokerUrl, '/accounts/register', { method: 'POST', body: { email, password } }),
+
+  claim: (brokerUrl: string, code: string) =>
+    requestAt<BrokerClaimResult>(brokerUrl, '/pair/claim', { method: 'POST', body: { code } }),
+
+  devices: (brokerUrl: string, token: string) =>
+    requestAt<{ devices: BrokerDevice[] }>(brokerUrl, '/devices', { token }),
+
+  me: (brokerUrl: string, token: string) =>
+    requestAt<{ id: string; email: string }>(brokerUrl, '/accounts/me', { token }),
+
+  // Exchange a broker token for a laptop token at the laptop's /auth/broker.
+  exchange: (serverUrl: string, brokerToken: string) =>
+    requestAt<{ token: string }>(serverUrl, '/auth/broker', { method: 'POST', body: { token: brokerToken } }),
+};
 
 // Shared native multipart upload: copies the picked file to a path named after
 // the original (so the server records the real filename), then streams it from

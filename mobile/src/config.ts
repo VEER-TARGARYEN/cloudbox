@@ -15,3 +15,9 @@
 export const DEFAULT_API_BASE_URL = (
   process.env.EXPO_PUBLIC_API_URL?.replace(/\/+$/, '') || ''
 );
+
+// The default cloud broker URL (one shared broker for everyone). Used to
+// prefill the broker fields on the Connect screens; QR pairing can override it.
+export const DEFAULT_BROKER_URL = (
+  process.env.EXPO_PUBLIC_BROKER_URL?.replace(/\/+$/, '') || ''
+);
