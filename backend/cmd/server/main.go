@@ -5,8 +5,10 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"os/exec"
 	"os/signal"
 	"path/filepath"
+	"runtime"
 	"syscall"
 	"time"
 
@@ -20,7 +22,9 @@ import (
 	"github.com/VEER-TARGARYEN/cloudbox/backend/internal/fsbrowser"
 	"github.com/VEER-TARGARYEN/cloudbox/backend/internal/handlers"
 	appmw "github.com/VEER-TARGARYEN/cloudbox/backend/internal/middleware"
+	"github.com/VEER-TARGARYEN/cloudbox/backend/internal/setupui"
 	"github.com/VEER-TARGARYEN/cloudbox/backend/internal/storage"
+	"github.com/VEER-TARGARYEN/cloudbox/backend/internal/tunnel"
 )
 
 func main() {
@@ -60,26 +64,61 @@ func main() {
 		log.Printf("filesystem access: restricted to %v, read-only=%v", cfg.FSAllowRoots, cfg.FSReadOnly)
 	}
 
-	// Optional: link this laptop to a cloud broker for device pairing. Enabled
-	// only when all four broker settings are present (the launcher fills them in
-	// once it knows the tunnel URL).
-	if cfg.BrokerURL != "" && cfg.BrokerEmail != "" && cfg.BrokerPassword != "" && cfg.PublicURL != "" {
-		brokerAuth := brokerlink.NewAuth()
-		h.Broker = brokerAuth
-		dataDir := filepath.Dir(cfg.DatabaseURL)
-		go brokerlink.Run(brokerlink.Opts{
-			BrokerURL:   cfg.BrokerURL,
-			Email:       cfg.BrokerEmail,
-			Password:    cfg.BrokerPassword,
-			DeviceName:  cfg.DeviceName,
-			PublicURL:   cfg.PublicURL,
-			PersistPath: filepath.Join(dataDir, "broker-device.json"),
-			QRPath:      filepath.Join(dataDir, "pair-qr.png"),
-		}, brokerAuth)
-		log.Printf("broker link enabled: %s (public URL %s)", cfg.BrokerURL, cfg.PublicURL)
-	} else {
-		log.Println("broker link disabled (set BROKER_URL/EMAIL/PASSWORD + PUBLIC_URL to enable)")
+	// ── Broker pairing + local setup UI ──────────────────────────────────────
+	// Public URL: use PUBLIC_URL if set, otherwise spawn a Cloudflare tunnel so
+	// the .exe is fully self-contained.
+	publicURL := cfg.PublicURL
+	tunnelStop := func() {}
+	if publicURL == "" {
+		if u, stop := tunnel.Start(context.Background(), cfg.Port); u != "" {
+			publicURL, tunnelStop = u, stop
+			log.Println("tunnel ready:", u)
+		} else {
+			log.Println("tunnel: cloudflared not found — set PUBLIC_URL or run a tunnel yourself")
+		}
 	}
+	defer tunnelStop()
+
+	deviceName := cfg.DeviceName
+	if deviceName == "" {
+		if hn, err := os.Hostname(); err == nil && hn != "" {
+			deviceName = hn
+		} else {
+			deviceName = "My Laptop"
+		}
+	}
+
+	dataDir := filepath.Dir(cfg.DatabaseURL)
+	linker := brokerlink.NewLinker(
+		cfg.BrokerURL, publicURL, deviceName,
+		filepath.Join(dataDir, "broker-device.json"),
+		filepath.Join(dataDir, "pair-qr.png"),
+	)
+	h.Broker = linker.Auth()
+
+	// Headless auto-connect when credentials are supplied via env.
+	if cfg.BrokerEmail != "" && cfg.BrokerPassword != "" {
+		go func() {
+			if err := linker.Connect(cfg.BrokerEmail, cfg.BrokerPassword, false); err != nil {
+				log.Println("broker: auto-connect failed:", err)
+			}
+		}()
+	}
+
+	// Local setup UI (loopback only) where you sign in and see the pairing QR.
+	setupSrv := &http.Server{
+		Addr:              "127.0.0.1:" + cfg.SetupPort,
+		Handler:           setupui.New(linker).Routes(),
+		ReadHeaderTimeout: 10 * time.Second,
+	}
+	go func() {
+		if err := setupSrv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			log.Println("setup UI error:", err)
+		}
+	}()
+	setupURL := "http://127.0.0.1:" + cfg.SetupPort + "/"
+	log.Println("setup UI:", setupURL)
+	openBrowser(setupURL)
 
 	// 5. Build the router + global middleware.
 	//    NOTE: we deliberately do NOT add a blanket request timeout here. The
@@ -143,8 +182,27 @@ func main() {
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
+	_ = setupSrv.Shutdown(ctx)
 	if err := srv.Shutdown(ctx); err != nil {
 		log.Fatalf("graceful shutdown failed: %v", err)
 	}
 	log.Println("server stopped")
+}
+
+// openBrowser opens url in the user's default browser (best-effort). Set
+// CLOUDBOX_NO_BROWSER to skip (headless servers, automated runs).
+func openBrowser(url string) {
+	if os.Getenv("CLOUDBOX_NO_BROWSER") != "" {
+		return
+	}
+	var cmd *exec.Cmd
+	switch runtime.GOOS {
+	case "windows":
+		cmd = exec.Command("rundll32", "url.dll,FileProtocolHandler", url)
+	case "darwin":
+		cmd = exec.Command("open", url)
+	default:
+		cmd = exec.Command("xdg-open", url)
+	}
+	_ = cmd.Start()
 }

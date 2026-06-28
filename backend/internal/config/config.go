@@ -24,6 +24,7 @@ type Config struct {
 	BrokerPassword string
 	PublicURL      string // this laptop's current public (tunnel) URL
 	DeviceName     string
+	SetupPort      string // loopback port for the local setup UI
 }
 
 // Load reads configuration from environment variables, falling back to sane
@@ -42,11 +43,12 @@ func Load() Config {
 		MaxUploadBytes: getenvInt64("MAX_UPLOAD_BYTES", 2<<30), // 2 GiB
 		FSAllowRoots:   getenvList("FS_ALLOW_ROOTS"),
 		FSReadOnly:     getenvBool("FS_READONLY", false),
-		BrokerURL:      getenv("BROKER_URL", ""),
+		BrokerURL:      getenv("BROKER_URL", "https://cloudbox-broker.onrender.com"),
 		BrokerEmail:    getenv("BROKER_EMAIL", ""),
 		BrokerPassword: getenv("BROKER_PASSWORD", ""),
 		PublicURL:      getenv("PUBLIC_URL", ""),
-		DeviceName:     getenv("DEVICE_NAME", "My Laptop"),
+		DeviceName:     getenv("DEVICE_NAME", ""),
+		SetupPort:      getenv("SETUP_PORT", "8765"),
 	}
 }
 

@@ -1,6 +1,7 @@
-// Package brokerlink connects the laptop server to the cloud broker: it logs
-// in, registers the device, heartbeats the current public URL, writes a pairing
-// QR, and validates phone tokens for /auth/broker.
+// Package brokerlink connects the laptop server to the cloud broker on demand
+// (driven by the setup UI): it logs in / registers, registers the device,
+// heartbeats the current public URL, writes a pairing QR, and validates phone
+// tokens for /auth/broker.
 package brokerlink
 
 import (
@@ -25,7 +26,7 @@ type Auth struct {
 	ready   bool
 }
 
-func NewAuth() *Auth { return &Auth{} }
+func newAuth() *Auth { return &Auth{} }
 
 func (a *Auth) set(c *brokerclient.Client, ownerID string) {
 	a.mu.Lock()
@@ -51,74 +52,136 @@ func (a *Auth) Verify(token string) (string, error) {
 	return id, nil
 }
 
-type Opts struct {
-	BrokerURL   string
-	Email       string
-	Password    string
-	DeviceName  string
-	PublicURL   string // the laptop's current public (tunnel) URL
-	PersistPath string // remembers device id + pair code across restarts
-	QRPath      string // where to write the pairing QR PNG
+// Linker owns the connection to the broker for this laptop.
+type Linker struct {
+	brokerURL   string
+	deviceName  string
+	persistPath string
+	qrPath      string
+	client      *brokerclient.Client
+	auth        *Auth
+
+	mu        sync.RWMutex
+	publicURL string
+	connected bool
+	email     string
+	pairCode  string
+	deviceID  string
+}
+
+func NewLinker(brokerURL, publicURL, deviceName, persistPath, qrPath string) *Linker {
+	return &Linker{
+		brokerURL:   brokerURL,
+		publicURL:   publicURL,
+		deviceName:  deviceName,
+		persistPath: persistPath,
+		qrPath:      qrPath,
+		client:      brokerclient.New(brokerURL),
+		auth:        newAuth(),
+	}
+}
+
+func (l *Linker) Auth() *Auth   { return l.auth }
+func (l *Linker) QRPath() string { return l.qrPath }
+
+// SetPublicURL updates the URL the laptop announces (e.g. once the tunnel is up).
+func (l *Linker) SetPublicURL(url string) {
+	l.mu.Lock()
+	l.publicURL = url
+	l.mu.Unlock()
+}
+
+// Status is a snapshot for the setup UI.
+type Status struct {
+	Connected bool   `json:"connected"`
+	Email     string `json:"email"`
+	HasQR     bool   `json:"has_qr"`
+	BrokerURL string `json:"broker"`
+	PublicURL string `json:"public_url"`
+}
+
+func (l *Linker) Status() Status {
+	l.mu.RLock()
+	defer l.mu.RUnlock()
+	return Status{
+		Connected: l.connected,
+		Email:     l.email,
+		HasQR:     l.pairCode != "",
+		BrokerURL: l.brokerURL,
+		PublicURL: l.publicURL,
+	}
+}
+
+// Connect logs in (registering first if `register`), registers/reuses a device,
+// writes the QR, and starts heartbeating. Safe to call from the setup UI.
+func (l *Linker) Connect(email, password string, register bool) error {
+	l.mu.RLock()
+	publicURL := l.publicURL
+	l.mu.RUnlock()
+	if publicURL == "" {
+		return errors.New("the public tunnel isn't ready yet — wait a few seconds and try again")
+	}
+
+	if register {
+		if err := l.client.Register(email, password); err != nil {
+			return err
+		}
+	}
+	token, accountID, err := l.client.Login(email, password)
+	if err != nil {
+		return err
+	}
+	l.auth.set(l.client, accountID)
+
+	dev := loadDevice(l.persistPath)
+	if dev.DeviceID == "" {
+		id, code, err := l.client.RegisterDevice(token, l.deviceName, publicURL)
+		if err != nil {
+			return err
+		}
+		dev = persisted{DeviceID: id, PairCode: code}
+		saveDevice(l.persistPath, dev)
+	}
+	writeQR(l.qrPath, l.brokerURL, dev.PairCode)
+
+	l.mu.Lock()
+	l.connected, l.email, l.pairCode, l.deviceID = true, email, dev.PairCode, dev.DeviceID
+	l.mu.Unlock()
+
+	go l.heartbeat(token, password)
+	return nil
+}
+
+func (l *Linker) heartbeat(token, password string) {
+	for {
+		time.Sleep(60 * time.Second)
+		l.mu.RLock()
+		deviceID, publicURL, email := l.deviceID, l.publicURL, l.email
+		l.mu.RUnlock()
+
+		err := l.client.Heartbeat(token, deviceID, publicURL)
+		switch {
+		case errors.Is(err, brokerclient.ErrDeviceGone):
+			if id, code, e := l.client.RegisterDevice(token, l.deviceName, publicURL); e == nil {
+				saveDevice(l.persistPath, persisted{DeviceID: id, PairCode: code})
+				writeQR(l.qrPath, l.brokerURL, code)
+				l.mu.Lock()
+				l.deviceID, l.pairCode = id, code
+				l.mu.Unlock()
+			}
+		case err != nil:
+			log.Printf("broker: heartbeat error (%v); re-logging in", err)
+			if t, a, e := l.client.Login(email, password); e == nil {
+				token = t
+				l.auth.set(l.client, a)
+			}
+		}
+	}
 }
 
 type persisted struct {
 	DeviceID string `json:"device_id"`
 	PairCode string `json:"pair_code"`
-}
-
-// Run links to the broker then heartbeats forever. Call in a goroutine; it
-// populates `auth` once logged in so /auth/broker starts working.
-func Run(opts Opts, auth *Auth) {
-	client := brokerclient.New(opts.BrokerURL)
-
-	// 1. Log in (retry until the broker is reachable).
-	var token, accountID string
-	for {
-		var err error
-		token, accountID, err = client.Login(opts.Email, opts.Password)
-		if err == nil {
-			break
-		}
-		log.Printf("broker: login failed (%v); retrying in 30s", err)
-		time.Sleep(30 * time.Second)
-	}
-	auth.set(client, accountID)
-	log.Println("broker: linked as", opts.Email)
-
-	// 2. Reuse a saved device, or register a new one.
-	dev := loadDevice(opts.PersistPath)
-	if dev.DeviceID == "" {
-		if id, code, err := client.RegisterDevice(token, opts.DeviceName, opts.PublicURL); err != nil {
-			log.Printf("broker: register device failed: %v", err)
-		} else {
-			dev = persisted{DeviceID: id, PairCode: code}
-			saveDevice(opts.PersistPath, dev)
-		}
-	}
-	if dev.PairCode != "" {
-		writeQR(opts.QRPath, opts.BrokerURL, dev.PairCode)
-		log.Printf("broker: pair code = %s  (QR written to %s)", dev.PairCode, opts.QRPath)
-	}
-
-	// 3. Heartbeat the current URL forever.
-	for {
-		err := client.Heartbeat(token, dev.DeviceID, opts.PublicURL)
-		switch {
-		case errors.Is(err, brokerclient.ErrDeviceGone):
-			if id, code, e := client.RegisterDevice(token, opts.DeviceName, opts.PublicURL); e == nil {
-				dev = persisted{DeviceID: id, PairCode: code}
-				saveDevice(opts.PersistPath, dev)
-				writeQR(opts.QRPath, opts.BrokerURL, dev.PairCode)
-			}
-		case err != nil:
-			log.Printf("broker: heartbeat error (%v); re-logging in", err)
-			if t, a, e := client.Login(opts.Email, opts.Password); e == nil {
-				token = t
-				auth.set(client, a)
-			}
-		}
-		time.Sleep(60 * time.Second)
-	}
 }
 
 func loadDevice(path string) persisted {

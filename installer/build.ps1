@@ -25,12 +25,12 @@ Copy-Item (Join-Path $installer 'Start-CloudBox.ps1') (Join-Path $dist 'Start-Cl
 @"
 CloudBox
 ========
-Click "Start CloudBox" (Start Menu or Desktop). A window opens showing a
-Server URL like https://something.trycloudflare.com — type that into the
-Server field in the CloudBox mobile app, then register or sign in.
+Click "Start CloudBox" (Start Menu or Desktop). A setup page opens in your
+browser: sign in or create an account, and a QR code appears. On your phone,
+open the CloudBox app, tap "Scan QR code", and point it at the screen.
 
-Keep the window open while using the app. Close it to stop the server.
-Your files live in: %LOCALAPPDATA%\CloudBox\storage
+Keep the window open while using the app. Close it to stop.
+Your files stay on this PC under %LOCALAPPDATA%\CloudBox\storage
 "@ | Out-File -FilePath (Join-Path $dist 'README.txt') -Encoding ascii
 
 Write-Host "[4/4] Compiling installer with Inno Setup..." -ForegroundColor Cyan

@@ -56,6 +56,20 @@ func (c *Client) do(method, path, token string, body, out any) (int, error) {
 	return resp.StatusCode, nil
 }
 
+// Register creates a broker account. An already-existing account (409) is not
+// treated as an error — we'll just log in afterwards.
+func (c *Client) Register(email, password string) error {
+	code, err := c.do(http.MethodPost, "/accounts/register", "",
+		map[string]string{"email": email, "password": password}, nil)
+	if err != nil {
+		return err
+	}
+	if code == http.StatusCreated || code == http.StatusConflict {
+		return nil
+	}
+	return fmt.Errorf("register failed (status %d)", code)
+}
+
 // Login returns a broker session token + the account ID.
 func (c *Client) Login(email, password string) (token, accountID string, err error) {
 	var r struct {
