@@ -12,8 +12,8 @@ import {
 } from 'react-native';
 import { Feather } from '@expo/vector-icons';
 import * as DocumentPicker from 'expo-document-picker';
-import * as Sharing from 'expo-sharing';
 
+import { openLocalFile, shareLocalFile } from '../../src/utils/openFile';
 import { Screen } from '../../src/components/Screen';
 import { TopBar } from '../../src/components/TopBar';
 import { FsRow } from '../../src/components/FsRow';
@@ -120,26 +120,31 @@ export default function BrowserScreen() {
     }
   }, [path, token, load]);
 
-  // Download a real file to cache, then hand it to the OS share/preview sheet.
-  const openEntry = useCallback(
-    async (entry: FsEntry) => {
+  // Download a real file to cache, then run an action on the local copy.
+  const runWithFile = useCallback(
+    async (entry: FsEntry, action: (uri: string) => Promise<void>) => {
       if (!token) return;
       setSelected(null);
       try {
         setBusyPath(entry.path);
         const uri = await api.fsDownloadToCache(token, entry);
-        if (await Sharing.isAvailableAsync()) {
-          await Sharing.shareAsync(uri, { dialogTitle: entry.name });
-        } else {
-          Alert.alert('Downloaded', `Saved to:\n${uri}`);
-        }
+        await action(uri);
       } catch (e) {
-        Alert.alert('Download failed', e instanceof ApiError ? e.message : 'Something went wrong');
+        Alert.alert('Could not open file', e instanceof ApiError ? e.message : 'Something went wrong');
       } finally {
         setBusyPath(null);
       }
     },
     [token],
+  );
+
+  const onOpen = useCallback(
+    (entry: FsEntry) => runWithFile(entry, (uri) => openLocalFile(uri, entry.name)),
+    [runWithFile],
+  );
+  const onShare = useCallback(
+    (entry: FsEntry) => runWithFile(entry, (uri) => shareLocalFile(uri, entry.name)),
+    [runWithFile],
   );
 
   const renderRow = (item: FsRoot | FsEntry) => {
@@ -287,13 +292,21 @@ export default function BrowserScreen() {
 
       {/* File actions sheet */}
       <BottomSheet visible={!!selected} onClose={() => setSelected(null)}>
-        {selected && <FileActions entry={selected} onOpen={openEntry} />}
+        {selected && <FileActions entry={selected} onOpen={onOpen} onShare={onShare} />}
       </BottomSheet>
     </Screen>
   );
 }
 
-function FileActions({ entry, onOpen }: { entry: FsEntry; onOpen: (e: FsEntry) => void }) {
+function FileActions({
+  entry,
+  onOpen,
+  onShare,
+}: {
+  entry: FsEntry;
+  onOpen: (e: FsEntry) => void;
+  onShare: (e: FsEntry) => void;
+}) {
   const v = fileVisualByName(entry.name);
   return (
     <View>
@@ -312,8 +325,7 @@ function FileActions({ entry, onOpen }: { entry: FsEntry; onOpen: (e: FsEntry) =
       </View>
       <View style={styles.divider} />
       <SheetAction icon="external-link" label="Open" onPress={() => onOpen(entry)} />
-      <SheetAction icon="download" label="Download" onPress={() => onOpen(entry)} />
-      <SheetAction icon="share-2" label="Share" onPress={() => onOpen(entry)} />
+      <SheetAction icon="share-2" label="Share" onPress={() => onShare(entry)} />
     </View>
   );
 }
