@@ -2,15 +2,15 @@
 
 # ☁️ CloudBox
 
-**A self-hosted, privacy-first personal cloud — access the files on your own laptop from anywhere, on your phone.**
+**Your laptop's files, on your phone, from anywhere — by scanning a QR code.**
 
-A Google Drive alternative you fully own: a Go API + SQLite serving files straight off your hard drive, a React Native (Expo) mobile app, and a Cloudflare Tunnel for secure global access.
+A self-hosted, privacy-first personal cloud. Install a tiny app on your laptop, scan a QR with your phone, and browse, open, and upload **any file on your PC** over a secure connection. Your files never leave your machine.
 
-[Architecture](#-architecture) · [Quick start](#-quick-start) · [Go global](#-go-global-access-from-anywhere) · [Android APK](#-android-app-apk) · [API](#-api-reference) · [Security](#-security-measures)
+[Install](#-get-started-3-steps) · [How it works](#-how-it-works) · [Run from source](#-run-from-source-developers) · [Self-host the broker](#-self-host-your-own-broker) · [Security](#-security)
 
-![Go](https://img.shields.io/badge/Go-net%2Fhttp%20%2B%20chi-00ADD8?logo=go&logoColor=white)
-![SQLite](https://img.shields.io/badge/SQLite-database%2Fsql-003B57?logo=sqlite&logoColor=white)
-![Expo](https://img.shields.io/badge/React%20Native-Expo%20SDK%2056-000020?logo=expo&logoColor=white)
+![Go](https://img.shields.io/badge/Laptop-Go-00ADD8?logo=go&logoColor=white)
+![Expo](https://img.shields.io/badge/App-React%20Native%20%2B%20Expo-000020?logo=expo&logoColor=white)
+![SQLite](https://img.shields.io/badge/Broker-Go%20%2B%20SQLite-003B57?logo=sqlite&logoColor=white)
 ![License](https://img.shields.io/badge/license-MIT-green)
 
 </div>
@@ -19,223 +19,146 @@ A Google Drive alternative you fully own: a Go API + SQLite serving files straig
 
 ## ✨ Features
 
-- 📤 **Upload any file** from your phone via streaming `multipart/form-data` (constant memory, any size).
-- 📥 **Download & open** files through the native share/preview sheet.
-- 🗂️ **Per-user file browser** with pull-to-refresh, live upload progress, and optimistic delete.
-- 🔐 **JWT auth** with bcrypt-hashed passwords; the token is stored in the device Keychain/Keystore.
-- 🧱 **Bare-metal storage** — your files live as opaque blobs on *your* hard drive; only metadata goes in SQLite.
-- 🌍 **Access from anywhere** over a secure public HTTPS URL via Cloudflare Tunnel (or deploy to Render).
-- 🪶 **Tiny footprint** — a single static Go binary, no CGO, no heavy ORM, no external database.
+- 📁 **Access your whole PC** — Downloads, Documents, `C:\`, every drive — not just one folder.
+- 📷 **One-scan pairing** — scan a QR on your laptop; no IP addresses, no URLs to copy.
+- 🔗 **Permanent link** — the connection survives reboots and changing networks (the broker tracks where your laptop is).
+- 📥 **Open & share** — tap a file to open it in the right app, or share it onward.
+- 📤 **Upload** from your phone straight into any folder, with live progress.
+- 🔐 **Yours only** — JWT auth, hardware-backed token storage, path-traversal protection; files stay on your hardware.
+- 🪶 **Tiny & self-hostable** — a single Go binary on the laptop, an Expo app on the phone, and an optional lightweight cloud broker you can run yourself.
 
-## 🏗️ Architecture
+## 🚀 Get started (3 steps)
+
+> Works today on **Windows** (laptop) + **Android** (phone).
+
+1. **On your laptop:** download **`CloudBox-Setup.exe`** from the [Releases](https://github.com/VEER-TARGARYEN/cloudbox/releases) page and run it. Click **Start CloudBox** — a setup page opens in your browser. **Create an account**, and a **QR code** appears.
+2. **On your phone:** install **`cloudbox.apk`** (also on [Releases](https://github.com/VEER-TARGARYEN/cloudbox/releases) → enable "Install unknown apps" when prompted).
+3. **Open the app → Scan QR code → point it at your laptop screen.** Done — you're browsing your PC. 🎉
+
+Keep the laptop window open while you use the app. That's it.
+
+## 🏗️ How it works
 
 ```mermaid
 flowchart LR
-    subgraph Phone["📱 Mobile app (Expo / React Native)"]
-        UI["Login · File browser · Uploader"]
+    subgraph Phone["📱 CloudBox app"]
+        UI["Browse · open · upload"]
     end
-    subgraph Edge["☁️ Cloudflare Tunnel"]
-        T["Public HTTPS URL"]
+    subgraph Cloud["☁️ Broker (tiny cloud service)"]
+        B["Accounts + device directory<br/>QR pairing"]
     end
-    subgraph Laptop["💻 Your laptop"]
-        API["Go API :8080<br/>net/http + chi"]
-        DB[("SQLite<br/>metadata only")]
-        FS["📁 Hard drive<br/>storage/&lt;uuid&gt;"]
+    subgraph Laptop["💻 Your laptop — CloudBox.exe"]
+        S["Go server<br/>(your real filesystem)"]
+        T["Cloudflare tunnel"]
     end
 
-    UI -- "HTTPS + JWT" --> T --> API
-    API -- "users & files rows" --> DB
-    API -- "io.Copy streaming" --> FS
+    UI -- "1 · scan QR / sign in" --> B
+    B -- "2 · my laptop's current URL" --> UI
+    UI -- "3 · files (direct, over the tunnel)" --> T --> S
+    S -- "heartbeat: current URL" --> B
 ```
 
-**The core idea:** *metadata and bytes live in two different places.* SQLite stores **who owns what and what it's called**; the disk stores **the actual content under an opaque UUID filename**. That split is what makes the system secure (no path-traversal), fast (indexed lookups), and cheap (no blobs in the DB).
+- The **laptop app** opens a secure Cloudflare tunnel and tells the **broker** "I'm at this URL" (re-reporting whenever it changes).
+- Your **phone** asks the broker "where's my laptop?" — by scanning the QR (or signing in) — then talks to the laptop **directly** for files.
+- The broker is just a small **directory + pairing** service. It never sees your files; it only knows *where* your laptop is.
 
 ## 🧰 Tech stack
 
-| Layer | Choice | Why |
+| Part | Stack | Role |
 |---|---|---|
-| API & routing | **Go** (`net/http` + `go-chi/chi`) | Fast, single static binary, great stdlib HTTP |
-| Metadata DB | **SQLite** via `database/sql` (`modernc.org/sqlite`) | Pure-Go (no CGO), zero-ops, perfect for small relational metadata |
-| File storage | **Local disk** (bare-metal) | Right tool for large sequential I/O; you own the data |
-| Mobile | **React Native + Expo** (TypeScript, Expo Router) | One codebase, OTA-friendly, native modules without Xcode/Android Studio |
-| Secure storage | **expo-secure-store** | Hardware-backed Keychain / Keystore for the JWT |
-| Global access | **Cloudflare Tunnel** / Ngrok (or Render) | Secure public HTTPS without opening router ports |
+| **Laptop app** | Go (`net/http` + chi), SQLite, bundled `cloudflared` | Serves your real filesystem; self-contained `.exe` |
+| **Mobile app** | React Native + Expo (TypeScript, Expo Router) | Browse / open / upload; QR scanner; secure token storage |
+| **Broker** | Go + SQLite, Docker | Verified accounts + device directory + QR pairing |
+| **Transport** | Cloudflare Tunnel | Public HTTPS to the laptop without opening ports |
 
 ## 📁 Repository structure
 
 ```
 cloudbox/
-├── backend/                     # Go API + file manager
-│   ├── cmd/server/main.go       # entrypoint: config → db → router → serve
-│   ├── internal/
-│   │   ├── config/              # env-based configuration
-│   │   ├── database/            # SQLite connection, pragmas, schema.sql
-│   │   ├── models/              # User, File structs
-│   │   ├── auth/                # bcrypt + JWT (HS256)
-│   │   ├── middleware/          # Bearer-token auth → injects user_id
-│   │   ├── storage/             # the only code that touches the filesystem
-│   │   └── handlers/            # register, login, upload, list, download, delete
-│   └── Dockerfile               # static image (optional Render deploy)
-├── mobile/                      # React Native (Expo) app
-│   ├── app/                     # expo-router screens: (auth)/ + (app)/
-│   └── src/                     # api client, auth context, components, theme
-├── render.yaml                  # optional Render Blueprint
-└── README.md
+├── backend/      # the laptop app (Go): file server, setup UI, tunnel, broker link
+├── mobile/       # the phone app (Expo / React Native)
+├── broker/       # the cloud pairing service (Go) — deploy this once
+├── installer/    # builds CloudBox-Setup.exe (Inno Setup)
+└── render.yaml   # one-click broker deploy on Render
 ```
 
-## 🖥️ Easiest: one-click Windows install
+## 🧑‍💻 Run from source (developers)
 
-Don't want the command line? Grab **`CloudBox-Setup.exe`** from the
-[Releases](https://github.com/VEER-TARGARYEN/cloudbox/releases) page and run it,
-then click **Start CloudBox**. It launches the server, opens a secure public
-tunnel, and shows a **Server URL** like `https://something.trycloudflare.com`.
+**Prerequisites:** [Go](https://go.dev/dl/) 1.23+, [Node.js](https://nodejs.org/) 20+, [`cloudflared`](https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/downloads/), and the [Expo Go](https://expo.dev/go) app.
 
-Install the **CloudBox app** (the `.apk` on the same Releases page), open it,
-paste that Server URL into the **Server** field, and register. Your files stay on
-your laptop under `%LOCALAPPDATA%\CloudBox`. Keep the window open while you use
-the app.
-
-> Because the app asks for your server URL on the login screen, **one APK works
-> against any CloudBox server** — no rebuilding. Build the installer yourself
-> from [`installer/`](installer/README.md).
-
-## 🚀 Quick start (run from source)
-
-### Prerequisites
-- [Go](https://go.dev/dl/) 1.23+
-- [Node.js](https://nodejs.org/) 20+ and the [Expo Go](https://expo.dev/go) app on your phone
-
-### 1. Run the backend
-
+**Laptop server** (spawns its own tunnel + opens the setup UI):
 ```bash
 cd backend
-# set a strong signing secret (anything long & random)
-export JWT_SECRET="$(openssl rand -base64 48)"   # PowerShell: see backend/.env.example
 go run ./cmd/server
+# → your browser opens http://127.0.0.1:8765 — sign in, get a QR
 ```
 
-The server starts on `http://localhost:8080`, creating `data/cloudbox.db` and a `storage/` folder. Verify:
-
-```bash
-curl http://localhost:8080/health     # {"status":"ok",...}
-```
-
-### 2. Run the mobile app
-
-A phone can't reach your laptop via `localhost`, so point the app at your laptop's LAN IP:
-
+**Mobile app:**
 ```bash
 cd mobile
 npm install
-echo "EXPO_PUBLIC_API_URL=http://<YOUR-LAN-IP>:8080" > .env   # e.g. 192.168.1.20
-npx expo start
+# point "Sign in with email" at your broker (QR pairing carries it automatically):
+echo "EXPO_PUBLIC_BROKER_URL=https://your-broker.onrender.com" > .env
+npx expo start         # scan with Expo Go
 ```
 
-Scan the QR code with **Expo Go** (phone and laptop on the same Wi-Fi). Register → upload → done.
-
-> On Windows you may need to allow the server through the firewall the first time, and ensure your Wi-Fi is a *Private* network.
-
-## 🌍 Go global (access from anywhere)
-
-### Option A — Cloudflare Tunnel (recommended; files stay on your laptop)
-
-A tunnel gives your local server a public HTTPS URL without opening any router ports. **Quick tunnel** (no account, ephemeral URL):
-
-```bash
-# 1. keep the backend running:  go run ./cmd/server
-# 2. in another terminal:
-cloudflared tunnel --url http://localhost:8080
-```
-
-It prints a URL like `https://random-words.trycloudflare.com`. Put that in `mobile/.env`:
-
-```
-EXPO_PUBLIC_API_URL=https://random-words.trycloudflare.com
-```
-
-For a **stable URL on your own domain**, create a named tunnel (free Cloudflare account):
-
-```bash
-cloudflared tunnel login
-cloudflared tunnel create cloudbox
-cloudflared tunnel route dns cloudbox cloudbox.yourdomain.com
-cloudflared tunnel run --url http://localhost:8080 cloudbox
-```
-
-> Prefer Ngrok? `ngrok http 8080` works the same way.
-
-### Option B — Deploy to Render (no laptop required)
-
-Push this repo to GitHub, then **Render → New → Blueprint → pick your repo**. It reads [`render.yaml`](render.yaml) and builds [`backend/Dockerfile`](backend/Dockerfile).
-
-> ⚠️ **Free instances have an ephemeral filesystem** — uploaded files and the SQLite DB are wiped on every restart/redeploy, and the service sleeps after ~15 min idle. For durable storage, use a paid plan and uncomment the `disk:` block in `render.yaml`.
-
-## 📦 Android app (APK)
-
-Build a sideloadable APK in the cloud with [EAS Build](https://docs.expo.dev/build/introduction/) (free tier, needs a free Expo account):
-
+**Build the Android APK** ([EAS](https://docs.expo.dev/build/introduction/), free Expo account):
 ```bash
 cd mobile
-npm install -g eas-cli      # or: npx eas-cli@latest
-eas login
-eas build -p android --profile preview
+npx eas-cli@latest build -p android --profile preview
 ```
 
-When it finishes, EAS prints a download link to a `.apk`. Download it, then on your phone enable **Install unknown apps** and open the file. To distribute it, attach the `.apk` to a **GitHub Release**:
-
-```bash
-gh release create v1.0.0 cloudbox.apk --title "CloudBox v1.0.0" --notes "First release"
+**Build the Windows installer:**
+```powershell
+powershell -ExecutionPolicy Bypass -File installer\build.ps1
+# → installer\Output\CloudBox-Setup.exe
 ```
 
-> You **don't** need to bake in a server URL — the app asks for it on the login screen and saves it on the device, so one APK works with any server. `EXPO_PUBLIC_API_URL` only sets an optional default to prefill that field.
+## 🌐 Self-host your own broker
 
-## 📡 API reference
+The broker is a tiny stateless-ish directory service. Deploy your own so you're not relying on anyone else's:
 
-All `/files*` and `/me` routes require an `Authorization: Bearer <token>` header.
+1. Push this repo to GitHub, then on [Render](https://render.com): **New ▸ Blueprint ▸ pick your repo**. It reads [`render.yaml`](render.yaml) and deploys [`broker/Dockerfile`](broker/Dockerfile). `JWT_SECRET` and the public URL are set automatically.
+2. Build the APK with `EXPO_PUBLIC_BROKER_URL` pointing at your broker (only affects the "Sign in with email" default — **QR pairing already carries the broker URL**, so a single APK works with any broker).
 
-| Method | Path | Body | Description |
-|---|---|---|---|
-| `GET` | `/health` | – | Liveness + DB check |
-| `POST` | `/register` | `{ email, password }` | Create account → `{ token, user }` |
-| `POST` | `/login` | `{ email, password }` | Authenticate → `{ token, user }` |
-| `GET` | `/me` | – | Current user profile |
-| `POST` | `/upload` | `multipart/form-data` field `file` | Upload a file → file metadata |
-| `GET` | `/files` | – | List the caller's files (newest first) |
-| `GET` | `/files/{id}/download` | – | Stream one of the caller's files |
-| `DELETE` | `/files/{id}` | – | Delete one of the caller's files |
+> ⚠️ **Persistence:** Render's free tier has an ephemeral disk — accounts reset on restart. Fine for testing; for permanent accounts, attach a paid disk (see the commented block in `render.yaml`) or point `DATABASE_URL` at a hosted DB.
+>
+> ✉️ **Email:** with no SMTP configured, accounts are auto-verified (no email server, no dead end). Set `SMTP_*` (e.g. Resend/Brevo) to require real verification.
 
-## ⚙️ Configuration
+## 📡 Laptop API (reference)
 
-The backend is configured entirely through environment variables (see [`backend/.env.example`](backend/.env.example)):
+All `/fs*` routes require a Bearer token (obtained by pairing).
 
-| Variable | Default | Description |
+| Method | Path | Description |
 |---|---|---|
-| `PORT` | `8080` | HTTP port to listen on |
-| `DATABASE_URL` | `./data/cloudbox.db` | Path to the SQLite file |
-| `STORAGE_DIR` | `./storage` | Directory for file blobs |
-| `JWT_SECRET` | *(dev default)* | **Set a long random value in production** — anyone with it can forge tokens |
-| `MAX_UPLOAD_BYTES` | `2147483648` | Max single-upload size (2 GiB) |
+| `GET` | `/health` | Liveness |
+| `POST` | `/auth/broker` | Exchange a broker token for a laptop token |
+| `GET` | `/fs/roots` | Drives + Home/Downloads/Desktop/Documents |
+| `GET` | `/fs/list?path=` | List a directory |
+| `GET` | `/fs/download?path=` | Stream a real file |
+| `POST` | `/fs/upload?path=` | Upload into a real folder |
 
-## 🛡️ Security measures
+## 🛡️ Security
 
-- **Passwords** are hashed with **bcrypt** (per-password salt, tunable work factor) — never stored in plaintext.
-- **JWT verification pins the algorithm** to HMAC, blocking the `alg:none` / algorithm-confusion attacks.
-- **Directory-traversal proof:** uploaded files are saved under a server-generated **UUID**, never the client's filename — a malicious name like `../../etc/passwd` is only ever stored as harmless display metadata.
-- **Per-user isolation:** every file query is scoped `WHERE user_id = ?` (from the verified token); another user's file returns `404`, never a leak.
-- **No account enumeration:** login returns one generic error for both "unknown email" and "wrong password", with timing equalized via a dummy bcrypt comparison.
-- **Upload size cap** via `MaxBytesReader` so one client can't fill the disk.
+- **Passwords** are bcrypt-hashed (broker side); the JWT is stored in the device Keychain/Keystore.
+- **JWT verification pins the algorithm** (blocks `alg:none`/confusion attacks).
+- **No path traversal:** every filesystem path is cleaned, must be absolute, and is checked against an allow-list (`FS_ALLOW_ROOTS`, default = full access; `FS_READONLY` to forbid writes).
+- **Federated login:** the laptop validates a phone's broker token via the broker (introspection) and only accepts it for its owner.
+- **The broker never sees your files** — only your laptop's current URL.
+
+> ⚠️ CloudBox exposes your PC's filesystem over the internet by design. Use a strong password, keep `FS_ALLOW_ROOTS`/`FS_READONLY` in mind, and run your own broker for full control.
 
 ## 🗺️ Roadmap
 
-- [ ] Folders / nested paths
-- [ ] Resumable downloads (HTTP range requests)
-- [ ] Thumbnails & in-app previews
-- [ ] Shareable public links with expiry
-- [ ] Refresh tokens + token revocation
+- [ ] macOS / Linux laptop builds
+- [ ] In-app thumbnails & previews
+- [ ] Multiple linked laptops per account
+- [ ] Short-lived / rotating pairing codes
+- [ ] Real-email verification by default
 
 ## 🤝 Contributing
 
-Issues and PRs welcome! This project is intentionally small and readable — a great place to learn full-stack + systems design.
+Issues and PRs welcome — it's a compact, readable full-stack + systems-design project. See the per-folder `README`s.
 
 ## 📄 License
 
